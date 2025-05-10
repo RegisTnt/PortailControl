@@ -10,6 +10,10 @@
 const int RELAY_PIETON = 16;
 const int RELAY_VOITURE = 17;
 
+// 🔁 Logique des relais
+#define RELAIS_REPOS LOW      // Le relais est au repos quand la broche est à LOW
+#define RELAIS_ACTIVE HIGH    // Le relais est activé quand la broche est à HIGH
+
 // 🌐 Serveur web (déjà déclaré dans wifi_manager.cpp)
 extern AsyncWebServer server;
 
@@ -47,8 +51,8 @@ void setup() {
   // 🛠️ Setup relais
   pinMode(RELAY_PIETON, OUTPUT);
   pinMode(RELAY_VOITURE, OUTPUT);
-  digitalWrite(RELAY_PIETON, HIGH);
-  digitalWrite(RELAY_VOITURE, HIGH);
+  digitalWrite(RELAY_PIETON, RELAIS_REPOS);
+  digitalWrite(RELAY_VOITURE, RELAIS_REPOS);
 
   // 🌐 Routes HTTP principales
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -56,16 +60,16 @@ void setup() {
   });
 
   server.on("/pieton", HTTP_GET, [](AsyncWebServerRequest *request){
-    digitalWrite(RELAY_PIETON, LOW);
+    digitalWrite(RELAY_PIETON, RELAIS_ACTIVE);
     delay(500);
-    digitalWrite(RELAY_PIETON, HIGH);
+    digitalWrite(RELAY_PIETON, RELAIS_REPOS);
     request->send(200, "text/plain", "Bouton Piéton actionné !");
   });
 
   server.on("/voiture", HTTP_GET, [](AsyncWebServerRequest *request){
-    digitalWrite(RELAY_VOITURE, LOW);
+    digitalWrite(RELAY_VOITURE, RELAIS_ACTIVE);
     delay(500);
-    digitalWrite(RELAY_VOITURE, HIGH);
+    digitalWrite(RELAY_VOITURE, RELAIS_REPOS);
     request->send(200, "text/plain", "Bouton Voiture actionné !");
   });
 
