@@ -1,75 +1,80 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Portail Connecté</title>
   <style>
     body {
       font-family: Arial, sans-serif;
+      background: #f0f0f0;
+      color: #333;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       height: 100vh;
-      background: #f0f0f0;
+      margin: 0;
+      padding: 20px;
     }
+
+    h1 {
+      margin-bottom: 30px;
+    }
+
     button {
       padding: 20px 40px;
-      margin: 20px;
+      margin: 10px;
       font-size: 24px;
       border: none;
       border-radius: 10px;
       background-color: #007BFF;
       color: white;
-      box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
+      box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.3);
       cursor: pointer;
       transition: background-color 0.3s;
     }
+
     button:hover {
       background-color: #0056b3;
     }
-    #message {
-      margin-top: 20px;
-      font-size: 20px;
-      color: green;
-      height: 1.5em;
+
+    a {
+      margin-top: 30px;
+      font-size: 18px;
+      color: #007BFF;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
+  <h1>Contrôle du Portail</h1>
 
-<h1>Contrôle du Portail (test QR code)</h1>
+  <button onclick="ouvrirPieton()">🚶 Mode Piéton</button>
+  <button onclick="ouvrirVoiture()">🚗 Mode Voiture</button>
 
-<button onclick="envoyerCommande('pieton')">🚶 Mode Piéton</button>
-<button onclick="envoyerCommande('voiture')">🚗 Mode Voiture</button>
+  <a href="/settings">⚙️ Paramètres</a>
 
-<div id="message"></div>
+  <script>
+    function ouvrirPieton() {
+      fetch('/pieton').then(response => {
+        console.log("Commande piéton envoyée");
+      }).catch(error => {
+        alert("Erreur lors de l'envoi de la commande piéton");
+      });
+    }
 
-<script>
-function envoyerCommande(type) {
-  fetch(`/${type}`)
-    .then(response => {
-      if (response.ok) {
-        afficherMessage(`Commande ${type === 'pieton' ? 'Piéton' : 'Voiture'} envoyée !`);
-      } else {
-        afficherMessage("Erreur de communication !", true);
-      }
-    })
-    .catch(error => {
-      afficherMessage("Erreur réseau !", true);
-    });
-}
-
-function afficherMessage(texte, erreur = false) {
-  const message = document.getElementById("message");
-  message.innerText = texte;
-  message.style.color = erreur ? "red" : "green";
-  setTimeout(() => {
-    message.innerText = "";
-  }, 3000);
-}
-</script>
-
+    function ouvrirVoiture() {
+      fetch('/voiture').then(response => {
+        console.log("Commande voiture envoyée");
+      }).catch(error => {
+        alert("Erreur lors de l'envoi de la commande voiture");
+      });
+    }
+  </script>
 </body>
 </html>

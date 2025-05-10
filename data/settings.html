@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Paramètres Portail</title>
+  <style>
+    :root {
+      --bg-light: #f4f4f4;
+      --fg-light: #222;
+      --bg-dark: #121212;
+      --fg-dark: #eee;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      transition: background 0.3s, color 0.3s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+
+    h1 {
+      margin-bottom: 10px;
+    }
+
+    form {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin: 20px;
+      gap: 10px;
+    }
+
+    label {
+      font-weight: bold;
+    }
+
+    input[type="number"] {
+      padding: 8px;
+      font-size: 1.2em;
+      width: 120px;
+    }
+
+    button {
+      padding: 10px 20px;
+      font-size: 1em;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+
+    .info {
+      margin-top: 30px;
+      font-style: italic;
+      text-align: center;
+    }
+
+    a {
+      margin-top: 20px;
+      color: inherit;
+      text-decoration: underline;
+    }
+  </style>
+
+  <script>
+    function appliquerTheme() {
+      const h = new Date().getHours();
+      const isNight = h < 7 || h > 19;
+      document.body.style.backgroundColor = isNight ? getComputedStyle(document.documentElement).getPropertyValue('--bg-dark') : getComputedStyle(document.documentElement).getPropertyValue('--bg-light');
+      document.body.style.color = isNight ? getComputedStyle(document.documentElement).getPropertyValue('--fg-dark') : getComputedStyle(document.documentElement).getPropertyValue('--fg-light');
+    }
+
+    function chargerInfoWiFi() {
+      fetch('/wifi-info')
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById("ip").textContent = data.ip;
+          document.getElementById("ssid").textContent = data.ssid;
+          document.getElementById("rssi").textContent = data.rssi + " dBm";
+        });
+    }
+
+    window.onload = () => {
+      appliquerTheme();
+      chargerInfoWiFi();
+    };
+  </script>
+</head>
+<body>
+  <h1>⚙️ Paramètres du Portail</h1>
+
+  <form action="/set-delay" method="POST">
+    <label for="delai">⏱️ Durée activation relais (ms)</label>
+    <input type="number" id="delai" name="delai" min="100" max="5000" value="500" required />
+    <button type="submit">💾 Enregistrer</button>
+  </form>
+
+  <div class="info">
+    <p><strong>Réseau WiFi :</strong> <span id="ssid">...</span></p>
+    <p><strong>IP locale :</strong> <span id="ip">...</span></p>
+    <p><strong>Signal :</strong> <span id="rssi">...</span></p>
+  </div>
+
+  <a href="/">← Retour à la page principale</a>
+</body>
+</html>
