@@ -1,104 +1,222 @@
-# 🚪 Projet Portail ESP32
 
-Commande de deux relais (piéton et voiture) via interface web sur ESP32.
-Interface hébergée dans SPIFFS, pilotée par `AsyncWebServer`.
+🚪 PortailControl ESP32
 
-## 📁 Arborescence du projet
+Système de commande de portail basé sur ESP32, avec interface web locale, OTA, SPIFFS, sécurité par enrôlement, et accès distant sécurisé.
 
-## ⚙️ Fonctionnalités prévues
 
-- Connexion Wi-Fi automatique
-- Commande relais piéton/voiture
-- Interface Web locale (HTML SPIFFS)
-- OTA à venir (mise à jour par WiFi)
+---
 
-## 🚀 En cours
+✅ Version actuelle
 
-- [X] Connexion WiFi
-- [X] Contrôle relais
-- [X] Page Web SPIFFS
-- [X] Ajout OTA
-- [ ] Commande Bluetooth secours
+🟢 v1.3-token-securite
 
-## 🔐 Informations sensibles
+> 🔒 Nouveautés :
 
-> **Ne pas oublier** de cacher les identifiants Wi-Fi (à terme, utiliser `secrets.h` non versionné via `.gitignore`)
->
->
-> # 🚪 PortailControl ESP32
->
-> Contrôleur de portail à base d'ESP32, avec interface web, mise à jour OTA, SPIFFS et gestion automatique du WiFi.
->
-> ---
->
-> ## ✅ Version stable
->
-> 🟢 Version actuelle : **`v1.2-relais-repos`**
->
->> 🔁 Les relais sont désormais **au repos à LOW** pour éviter la chauffe à la mise sous tension.
->>
->
-> ---
->
-> ## 🔧 Fonctionnalités
->
-> - Contrôle piéton et voiture via deux relais
-> - Interface web épurée (hébergée en SPIFFS)
-> - Configuration WiFi via fallback en mode AP
-> - Mise à jour OTA (Over-The-Air) possible
-> - Accès via `http://portail.local` grâce à mDNS
->
-> ---
->
-> ## 🖼️ Aperçu
->
-> 📘 [Voir la notice PDF](doc/Notice%20portail.pdf)
->
-> ---
->
-> ## 🚀 Déploiement
->
-> 1. Cloner le dépôt :
->
-> ```bash
-> git clone https://github.com/RegisTnt/PortailControl.git
-> cd PortailControl
-> ```
->
-> ## 🔌 Branchement au portail Extel
->
-> Ce projet a été testé avec succès sur un automatisme **Extel** acceptant un **contact sec** pour piloter l'ouverture piétonne ou totale. Le module ESP32, via ses deux relais, simule l'appui sur un bouton physique en **fermant brièvement le circuit entre les bornes** du portail :
->
-> | Action            | Bornes à relier via relais |
-> | ----------------- | --------------------------- |
-> | Ouverture piéton | `PHO`↔`⏴ piéton`     |
-> | Ouverture totale  | `PHO`↔`⏴ voiture`     |
->
-> Les relais sont configurés pour rester fermés pendant une durée réglable via l’interface `/settings`, reproduisant un  **contact momentané de 0,5 à 1 seconde** .
->
->> ⚠️ Assurez-vous que votre module relais fournit un **contact sec isolé** et ne transmet **aucune tension** vers le bornier du portail.
->>
->>
->
->
->
-> ## 🧪 Diagnostic des relais et prévention de chauffe
->
-> Avant tout branchement au portail, il est essentiel de s'assurer que les **relais sont bien au repos** à la mise sous tension. En effet, un relais inutilement activé en continu entraînera une  **chauffe du module** , une **usure prématurée** et une  **consommation inutile** . Pour vérifier cela, j'ai utilisé un multimètre en mode **test de continuité** hors alimentation.
->
-> Chaque module relais dispose de **trois bornes** :
->
-> * **NC** (Normally Closed – normalement fermé)
-> * **COM** (commun, au centre)
-> * **NO** (Normally Open – normalement ouvert)
->
-> En testant les combinaisons **entre les trois bornes** sans alimenter la carte, j’ai identifié le  **groupe de bornes où le contact est fermé au repos** . J’ai ensuite relié les **deux bornes non connectées au repos** (`NO` et `COM`) à la platine du portail. Ainsi, lors de l’activation, le relais ferme brièvement le circuit, simulant un **contact sec momentané** comme un bouton poussoir.
->
-> Enfin, le fichier `main.cpp` a été adapté pour inverser la logique des relais : leur **repos est désormais défini comme `LOW`** dans le code, et l’activation comme `HIGH`. Cela garantit un fonctionnement silencieux, sans déclenchement parasite à la mise sous tension, et sans sollicitation inutile des bobines relais.
->
->
-> ## 🌍 Accès distant au portail via Internet
->
-> Le système ESP32 de commande du portail a été configuré pour être accessible à distance depuis n’importe quelle connexion Internet (4G, Wi-Fi externe, etc.). Cette fonctionnalité repose sur la redirection de port (NAT/PAT) configurée sur la box Internet. L’interface web reste donc disponible hors du réseau local, ce qui permet d’ouvrir le portail à distance en toute simplicité.
->
-> Pour des raisons de sécurité, un port externe distinct du port par défaut a été utilisé, et l’adresse publique n’est volontairement pas indiquée dans ce document. Il est recommandé d’ajouter à l’avenir une authentification légère et de restreindre les accès par géolocalisation ou token partagé.
+Enrôlement utilisateur avec token sécurisé
+
+Authentification automatique par cookie
+
+Réglage du délai relais
+
+Interface /admin pour mise à jour du mot de passe maître (seulement sur réseau local)
+
+Téléchargement / restauration des utilisateurs (users.json)
+
+Redirection automatique vers /enrol si non authentifié
+
+
+
+
+
+---
+
+⚙️ Fonctionnalités
+
+🔐 Enrôlement sécurisé avec token unique stocké dans SPIFFS
+
+🖱️ Commande des relais via interface web moderne
+
+🌐 Accès local via mDNS (http://portail.local)
+
+🔁 OTA (mise à jour firmware sans fil)
+
+📁 Interface web hébergée sur SPIFFS (HTML/CSS/JS)
+
+⚙️ Interface de configuration (/settings)
+
+🔧 Réglage du temps d’activation des relais
+
+👥 Interface de gestion des utilisateurs (/users)
+
+🛡️ Page admin protégée accessible uniquement sur le bon réseau Wi-Fi
+
+💾 Sauvegarde / restauration des utilisateurs (users.json)
+
+
+
+---
+
+📁 Arborescence du projet
+
+PortailControl/
+├── data/
+│   ├── index.html
+│   ├── settings.html
+│   ├── enrol.html
+│   ├── users.html
+│   ├── admin.html
+│   └── users.json         <-- Tokens enrôlés
+├── src/
+│   ├── main.cpp           <-- Code principal
+│   ├── wifi_manager.cpp/h <-- Gestion Wi-Fi + fallback AP
+├── include/
+│   └── secrets.h          <-- (Wi-Fi privés, ignoré par git)
+├── lib/                   <-- Libs éventuelles
+├── platformio.ini         <-- Config PlatformIO
+├── .gitignore
+└── README.md              <-- Ce fichier
+
+
+---
+
+🖼️ Interfaces Web
+
+index.html : commande portail
+
+settings.html : réglages relais et accès
+
+users.html : liste et suppression des tokens
+
+admin.html : changement du mot de passe maître
+
+enrol.html : enrôlement via mot de passe
+
+/download-users : export de la base users.json
+
+/upload-users : restauration après mise à jour
+
+
+
+---
+
+🚀 Déploiement (PlatformIO)
+
+git clone https://github.com/RegisTnt/PortailControl.git
+cd PortailControl
+pio run --target uploadfs  # Pour SPIFFS
+pio run --target upload    # Pour firmware
+
+
+---
+
+🔌 Branchement au portail Extel
+
+Testé avec succès sur un moteur Extel piloté par contact sec :
+
+Action	Relais	Bornes à relier sur carte portail
+
+Ouverture piéton	RELAY_PIETON	PHO ↔ entrée piéton
+Ouverture totale	RELAY_VOITURE	PHO ↔ entrée voiture
+
+
+> ⚠️ Vérifie que ton relais fournit bien un contact sec (pas de tension) avant branchement.
+
+
+
+
+---
+
+🧪 Diagnostic relais : éviter la chauffe
+
+Les relais doivent rester au repos lors du démarrage pour éviter :
+
+surconsommation
+
+déclenchement accidentel
+
+usure prématurée
+
+
+Procédure :
+
+1. Déconnecte l’alim du module
+
+
+2. Identifie la borne commune (COM) du relais
+
+
+3. Utilise un multimètre en mode continuité :
+
+repère le groupe où COM est fermé au repos (avec NC)
+
+relie NO et COM au portail pour qu’ils ne se ferment qu’à l’activation
+
+
+
+
+Code modifié :
+
+#define RELAIS_REPOS LOW
+#define RELAIS_ACTIVE HIGH
+
+
+---
+
+🔐 Enrôlement et sécurité
+
+Un mot de passe maître (changemoi par défaut) est demandé pour enrôler un utilisateur
+
+Chaque utilisateur reçoit un token stocké dans un cookie auth_token
+
+Ce cookie est ensuite comparé à ceux du fichier users.json
+
+🔄 Authentification automatique après enrôlement
+
+Seuls les utilisateurs enrôlés peuvent accéder aux routes sensibles (/, /voiture, /pieton, etc.)
+
+
+
+---
+
+🔄 Administration
+
+Accessible uniquement si l’ESP32 est connecté au Wi-Fi déclaré dans le code (WIFI_MAISON).
+
+Fonctionnalité :
+
+Changement du mot de passe maître
+
+Accessible via /admin
+
+Protection : vérification du WiFi.SSID()
+
+
+
+---
+
+💾 Sauvegarde & Restauration utilisateurs
+
+Permet de conserver les accès après mise à jour du firmware ou réinstallation :
+
+/download-users → télécharge users.json
+
+/upload.html + formulaire → téléverse users.json
+
+
+⚠️ Ne pas éditer le fichier manuellement sans valider la structure JSON.
+
+
+---
+
+🌍 Accès à distance
+
+Fonctionne via redirection de port :
+
+Exemple : https://votre_ip_publique:8080
+
+NAT configuré sur la box vers IP locale de l'ESP32
+
+Recommandé : choisir un port non standard (> 1024)
+
+À terme, prévoir une validation par géolocalisation ou token partagé
+
