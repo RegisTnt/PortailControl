@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Paramètres du Portail</title>
+  <title>Administration</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body {
@@ -11,17 +11,28 @@
       padding: 20px;
       text-align: center;
     }
+
     h1 {
       margin-bottom: 30px;
     }
+
     form {
-      margin-bottom: 30px;
+      display: inline-block;
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
     }
-    input[type="number"] {
+
+    input[type="text"] {
       padding: 10px;
       font-size: 1em;
-      width: 100px;
+      width: 200px;
+      margin-bottom: 15px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
     }
+
     input[type="submit"] {
       padding: 10px 20px;
       font-size: 1em;
@@ -31,50 +42,38 @@
       border-radius: 5px;
       cursor: pointer;
     }
+
     input[type="submit"]:hover {
       background-color: #0056b3;
     }
+
     .link-button {
       display: inline-block;
-      margin-top: 10px;
+      margin-top: 30px;
       padding: 10px 20px;
-      background-color: #28a745;
+      background-color: #6c757d;
       color: white;
       text-decoration: none;
       border-radius: 5px;
     }
+
     .link-button:hover {
-      background-color: #218838;
-    }
-    .admin-button {
-      background-color: #17a2b8;
-    }
-    .admin-button:hover {
-      background-color: #138496;
-    }
-    .return-button {
-      background-color: #6c757d;
-    }
-    .return-button:hover {
       background-color: #5a6268;
     }
   </style>
 </head>
 <body>
 
-  <h1>Réglages du Portail</h1>
+  <h1>🔐 Administration</h1>
 
-  <form action="/set-delay" method="POST">
-    <label for="delai">Temps activation relais (ms) :</label>
-    <input type="number" name="delai" id="delai" min="100" max="5000" value="500">
+  <form method="POST" action="/update-pwd">
+    <label for="newpwd">Mot de passe maître :</label><br><br>
+    <input type="text" id="newpwd" name="newpwd" required><br><br>
     <input type="submit" value="Mettre à jour">
   </form>
 
-  <a href="/users" class="link-button">👥 Gérer les utilisateurs</a>
   <br><br>
-  <a href="/admin" class="link-button admin-button">🛡️ Administration</a>
-  <br><br>
-  <a href="/" class="link-button return-button">⬅️ Retour à l'accueil</a>
+  <a href="/settings" class="link-button">⬅️ Retour aux paramètres</a>
 
 </body>
 </html>

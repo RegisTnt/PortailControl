@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Enrôlement</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #f0f0f0;
+      text-align: center;
+      padding: 2rem;
+    }
+    form {
+      background: white;
+      padding: 2rem;
+      display: inline-block;
+      border-radius: 10px;
+      box-shadow: 0px 0px 10px #aaa;
+    }
+    input {
+      padding: 1rem;
+      margin: 1rem;
+      font-size: 1.2rem;
+      width: 80%;
+    }
+    button {
+      padding: 1rem 2rem;
+      font-size: 1.2rem;
+      background: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h2>🔐 Enrôlement</h2>
+  <form id="enrolForm">
+    <input type="text" id="username" placeholder="Nom d'utilisateur" required><br>
+    <input type="password" id="password" placeholder="Mot de passe maître" required><br>
+    <button type="submit">Valider</button>
+  </form>
+
+  <script>
+    document.getElementById('enrolForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+
+      const response = await fetch('/enrol', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
+      });
+
+      const result = await response.text();
+
+      if (response.ok) {
+        // Stocke le token en cookie
+        document.cookie = `auth_token=${result};path=/;max-age=2592000`; // 30 jours
+        alert("✅ Enrôlement réussi !");
+        window.location.href = '/';
+      } else {
+        alert("❌ " + result);
+      }
+    });
+  </script>
+</body>
+</html>

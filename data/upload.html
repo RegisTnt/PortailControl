@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Téléverser utilisateurs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #f0f0f0;
+      text-align: center;
+      padding: 2rem;
+    }
+    form {
+      background: white;
+      padding: 2rem;
+      display: inline-block;
+      border-radius: 10px;
+      box-shadow: 0px 0px 10px #aaa;
+    }
+    input {
+      padding: 1rem;
+      margin: 1rem;
+      font-size: 1.2rem;
+    }
+    button {
+      padding: 1rem 2rem;
+      font-size: 1.2rem;
+      background: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h2>📤 Importer utilisateurs</h2>
+  <form method="POST" action="/upload-users" enctype="multipart/form-data">
+    <input type="file" name="file" accept=".json" required><br>
+    <button type="submit">Téléverser</button>
+  </form>
+  <br>
+  <a href="/users">← Retour</a>
+</body>
+</html>
