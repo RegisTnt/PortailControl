@@ -2,8 +2,8 @@
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
 #include <SPIFFS.h>
+#include "wifi_manager.h"
 
-AsyncWebServer server(80);
 Preferences preferences;
 
 void startAPMode() {

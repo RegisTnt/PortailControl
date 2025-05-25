@@ -5,59 +5,28 @@
   <title>Paramètres du Portail</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f0f2f5;
-      padding: 20px;
-      text-align: center;
-    }
-    h1 {
-      margin-bottom: 30px;
-    }
-    form {
-      margin-bottom: 30px;
-    }
-    input[type="number"] {
-      padding: 10px;
-      font-size: 1em;
-      width: 100px;
+    body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 20px; text-align: center; }
+    h1 { margin-bottom: 30px; }
+    form { margin-bottom: 30px; }
+    input[type="number"], input[type="submit"] {
+      padding: 10px; font-size: 1em; margin-top: 10px; border-radius: 5px;
     }
     input[type="submit"] {
-      padding: 10px 20px;
-      font-size: 1em;
-      background-color: #007BFF;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
+      background-color: #007BFF; color: white; border: none; cursor: pointer;
     }
-    input[type="submit"]:hover {
-      background-color: #0056b3;
-    }
+    input[type="submit"]:hover { background-color: #0056b3; }
     .link-button {
-      display: inline-block;
-      margin-top: 10px;
-      padding: 10px 20px;
-      background-color: #28a745;
-      color: white;
-      text-decoration: none;
+      display: inline-block; margin-top: 10px; padding: 10px 20px;
+      background-color: #28a745; color: white; text-decoration: none;
       border-radius: 5px;
     }
-    .link-button:hover {
-      background-color: #218838;
-    }
-    .admin-button {
-      background-color: #17a2b8;
-    }
-    .admin-button:hover {
-      background-color: #138496;
-    }
-    .return-button {
-      background-color: #6c757d;
-    }
-    .return-button:hover {
-      background-color: #5a6268;
-    }
+    .link-button:hover { background-color: #218838; }
+    .admin-button { background-color: #17a2b8; }
+    .admin-button:hover { background-color: #138496; }
+    .return-button { background-color: #6c757d; }
+    .return-button:hover { background-color: #5a6268; }
+    .history-button { background-color: #ff9800; }
+    .history-button:hover { background-color: #e68900; }
   </style>
 </head>
 <body>
@@ -65,15 +34,22 @@
   <h1>Réglages du Portail</h1>
 
   <form action="/set-delay" method="POST">
-    <label for="delai">Temps activation relais (ms) :</label>
-    <input type="number" name="delai" id="delai" min="100" max="5000" value="500">
+    <label for="delai">Temps activation relais (ms) :</label><br>
+    <input type="number" name="delai" id="delai" min="100" max="5000" value="500"><br>
     <input type="submit" value="Mettre à jour">
   </form>
 
-  <a href="/users" class="link-button">👥 Gérer les utilisateurs</a>
-  <br><br>
-  <a href="/admin" class="link-button admin-button">🛡️ Administration</a>
-  <br><br>
+  <form action="/set-notifications" method="POST">
+    <h2>Notifications</h2>
+    <label><input type="checkbox" name="notif_ouverture" value="1"> 🔔 Notifier à chaque ouverture/fermeture</label><br><br>
+    <label><input type="checkbox" name="notif_rappel" value="1"> ⏰ Me rappeler si le portail reste ouvert plus de </label>
+    <input type="number" name="delai_rappel" min="1" max="60" value="10"> minutes<br><br>
+    <input type="submit" value="Enregistrer les notifications">
+  </form>
+
+  <a href="/users" class="link-button">👥 Gérer les utilisateurs</a><br><br>
+  <a href="/admin" class="link-button admin-button">🛡️ Administration</a><br><br>
+  <a href="/historique" class="link-button history-button">📄 Historique du Portail</a><br><br>
   <a href="/" class="link-button return-button">⬅️ Retour à l'accueil</a>
 
 </body>

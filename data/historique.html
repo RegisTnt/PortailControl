@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Historique du Portail</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f9f9f9;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+    }
+    pre {
+      background: #f0f0f0;
+      border: 1px solid #ccc;
+      padding: 10px;
+      white-space: pre-wrap;
+      overflow-x: auto;
+    }
+    a {
+      display: inline-block;
+      margin-top: 20px;
+      text-align: center;
+      display: block;
+      text-decoration: none;
+      color: #007BFF;
+    }
+  </style>
+</head>
+<body>
+  <h1>📝 Historique du Portail</h1>
+  <pre id="log">Chargement...</pre>
+  <a href="/">⬅️ Retour à l’accueil</a>
+
+  <script>
+    fetch('/log.txt')
+      .then(response => response.text())
+      .then(data => {
+        document.getElementById('log').innerText = data;
+      })
+      .catch(() => {
+        document.getElementById('log').innerText = "Erreur lors du chargement du journal.";
+      });
+  </script>
+</body>
+</html>

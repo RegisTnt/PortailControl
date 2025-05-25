@@ -4,79 +4,74 @@
 #include <ESPmDNS.h>
 #include <SPIFFS.h>
 #include <ArduinoOTA.h>
-#include <Preferences.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include "wifi_manager.h"
+#include <time.h>
+#include <HTTPClient.h>
 
-// === PARAMÈTRES ===
 #define RELAY_PIETON 16
 #define RELAY_VOITURE 17
+#define PIN_CAPTEUR_FERME 34
 #define RELAIS_REPOS LOW
 #define RELAIS_ACTIVE HIGH
 #define WIFI_MAISON "Bbox-69ABA8B3"
 
+AsyncWebServer server(80);  // seule définition ici
 Preferences prefs;
+
 String enrolPassword = "changemoi";
 int relaisDelay = 500;
-extern AsyncWebServer server;
+bool notifOuverture = false;
+bool notifRappel = false;
+int delaiRappelMinutes = 10;
 
-// === FONCTIONS DE SÉCURITÉ ===
-bool isTokenValid(AsyncWebServerRequest *request) {
-  if (!request->hasHeader("Cookie")) return false;
-  String cookie = request->getHeader("Cookie")->value();
-  int start = cookie.indexOf("auth_token=");
-  if (start == -1) return false;
-
-  start += strlen("auth_token=");
-  int end = cookie.indexOf(";", start);
-  if (end == -1) end = cookie.length();
-  String token = cookie.substring(start, end);
-
-  File file = SPIFFS.open("/users.json", "r");
-  if (!file) return false;
-
-  StaticJsonDocument<1024> doc;
-  deserializeJson(doc, file);
-  file.close();
-
-  for (JsonPair kv : doc.as<JsonObject>()) {
-    if (kv.value().as<String>() == token) return true;
+void logEtatPortail(const String &etat) {
+  time_t now = time(nullptr);
+  struct tm *timeinfo = localtime(&now);
+  char timestamp[20];
+  strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+  File log = SPIFFS.open("/log.txt", FILE_APPEND);
+  if (log) {
+    log.printf("%s;%s\n", timestamp, etat.c_str());
+    log.close();
+    Serial.printf("📝 Log : %s;%s\n", timestamp, etat.c_str());
   }
-  return false;
 }
 
-void addOrUpdateUser(const String &username, const String &token) {
-  StaticJsonDocument<1024> doc;
-  File file = SPIFFS.open("/users.json", "r");
-  if (file) {
-    deserializeJson(doc, file);
-    file.close();
-  }
-  doc[username] = token;
-  file = SPIFFS.open("/users.json", "w");
-  serializeJsonPretty(doc, file);
-  file.close();
-  Serial.println("✅ users.json mis à jour");
+void notifierPortailOuvert() {
+  HTTPClient http;
+  http.begin("https://maker.ifttt.com/trigger/portail_ouvert/with/key/ISeQ-N0oT9SG2bYB4N27h");
+  int httpCode = http.GET();
+  if (httpCode > 0) Serial.println("🔔 Notification IFTTT envoyée !");
+  else Serial.printf("❌ Erreur IFTTT : %d\n", httpCode);
+  http.end();
 }
 
 void setup() {
   Serial.begin(115200);
+  if (!SPIFFS.begin(true)) return;
 
-  if (!SPIFFS.begin(true)) {
-    Serial.println("Erreur SPIFFS !");
-    return;
+  if (!SPIFFS.exists("/log.txt")) {
+    File log = SPIFFS.open("/log.txt", FILE_WRITE);
+    if (log) {
+      log.println("Horodatage;État");
+      log.close();
+    }
   }
 
   prefs.begin("portail", false);
   relaisDelay = prefs.getInt("delai", 500);
   enrolPassword = prefs.getString("enrol_pwd", "changemoi");
+  notifOuverture = prefs.getBool("notif_ouverture", false);
+  notifRappel = prefs.getBool("notif_rappel", false);
+  delaiRappelMinutes = prefs.getInt("rappel_minutes", 10);
   prefs.end();
 
-  setupWiFi();
+  setupWiFi();  // appel défini dans wifi_manager.cpp
+  configTime(3600, 0, "pool.ntp.org", "time.nist.gov");
 
-  if (MDNS.begin("portail")) {
-    Serial.println("http://portail.local");
-  }
+  if (MDNS.begin("portail")) Serial.println("http://portail.local");
 
   ArduinoOTA.setHostname("portail-esp32");
   ArduinoOTA.setPassword("changemoi");
@@ -84,29 +79,13 @@ void setup() {
 
   pinMode(RELAY_PIETON, OUTPUT);
   pinMode(RELAY_VOITURE, OUTPUT);
+  pinMode(PIN_CAPTEUR_FERME, INPUT);
   digitalWrite(RELAY_PIETON, RELAIS_REPOS);
   digitalWrite(RELAY_VOITURE, RELAIS_REPOS);
 
-  // === ROUTES ===
+  // === Routes
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (!isTokenValid(request)) return request->redirect("/enrol");
     request->send(SPIFFS, "/index.html", "text/html");
-  });
-
-  server.on("/pieton", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (!isTokenValid(request)) return request->redirect("/enrol");
-    digitalWrite(RELAY_PIETON, RELAIS_ACTIVE);
-    delay(relaisDelay);
-    digitalWrite(RELAY_PIETON, RELAIS_REPOS);
-    request->send(200, "text/plain", "Piéton activé !");
-  });
-
-  server.on("/voiture", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (!isTokenValid(request)) return request->redirect("/enrol");
-    digitalWrite(RELAY_VOITURE, RELAIS_ACTIVE);
-    delay(relaisDelay);
-    digitalWrite(RELAY_VOITURE, RELAIS_REPOS);
-    request->send(200, "text/plain", "Voiture activée !");
   });
 
   server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -123,131 +102,68 @@ void setup() {
     request->redirect("/settings");
   });
 
-  server.on("/wifi-info", HTTP_GET, [](AsyncWebServerRequest *request) {
-    String json = "{";
-    json += "\"ssid\":\"" + String(WiFi.SSID()) + "\",";
-    json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
-    json += "\"rssi\":\"" + String(WiFi.RSSI()) + "\"}";
-    request->send(200, "application/json", json);
-  });
-
-  server.on("/enrol", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(SPIFFS, "/enrol.html", "text/html");
-  });
-
-  server.on("/enrol", HTTP_POST, [](AsyncWebServerRequest *request) {
-    if (!request->hasParam("username", true) || !request->hasParam("password", true)) {
-      request->send(400, "text/plain", "Champs manquants");
-      return;
+  server.on("/set-notifications", HTTP_POST, [](AsyncWebServerRequest *request) {
+    notifOuverture = request->hasParam("notif_ouverture", true);
+    notifRappel = request->hasParam("notif_rappel", true);
+    if (request->hasParam("delai_rappel", true)) {
+      delaiRappelMinutes = request->getParam("delai_rappel", true)->value().toInt();
     }
-    String username = request->getParam("username", true)->value();
-    String password = request->getParam("password", true)->value();
-
-    if (password != enrolPassword) {
-      request->send(403, "text/plain", "Mot de passe incorrect");
-      return;
-    }
-
-    String token = "";
-    for (int i = 0; i < 16; i++) token += String(random(16), HEX);
-    addOrUpdateUser(username, token);
-    request->send(200, "text/plain", token);
-  });
-
-  // === Upload/Download Users ===
-  server.on("/download-users", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (!SPIFFS.exists("/users.json")) {
-      request->send(404, "text/plain", "Fichier introuvable");
-      return;
-    }
-    request->send(SPIFFS, "/users.json", "application/json", true);
-  });
-
-  server.on("/upload-users", HTTP_POST, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "Fichier reçu");
-  }, [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-    static File uploadFile;
-    if (index == 0) {
-      uploadFile = SPIFFS.open("/users.json", "w");
-    }
-    if (uploadFile) {
-      uploadFile.write(data, len);
-    }
-    if (final) {
-      uploadFile.close();
-      Serial.println("✅ Upload terminé !");
-    }
-  });
-
-  // === ADMIN ===
-  server.on("/admin", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(SPIFFS, "/admin.html", "text/html");
-  });
-
-  server.on("/update-pwd", HTTP_POST, [](AsyncWebServerRequest *request) {
-    if (!request->hasParam("newpwd", true)) {
-      request->send(400, "text/plain", "Champ manquant");
-      return;
-    }
-    if (WiFi.SSID() != WIFI_MAISON) {
-      request->send(403, "text/plain", "⚠️ Réseau non autorisé");
-      return;
-    }
-    String newpwd = request->getParam("newpwd", true)->value();
     prefs.begin("portail", false);
-    prefs.putString("enrol_pwd", newpwd);
+    prefs.putBool("notif_ouverture", notifOuverture);
+    prefs.putBool("notif_rappel", notifRappel);
+    prefs.putInt("rappel_minutes", delaiRappelMinutes);
     prefs.end();
-    enrolPassword = newpwd;
-    Serial.println("🔐 Nouveau mot de passe d'enrôlement enregistré !");
-    request->send(200, "text/plain", "Mot de passe mis à jour !");
+    request->redirect("/settings");
   });
 
-  // === USERS ===
-  server.on("/users", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(SPIFFS, "/users.html", "text/html");
+    server.on("/pieton", HTTP_GET, [](AsyncWebServerRequest *request) {
+    digitalWrite(RELAY_PIETON, RELAIS_ACTIVE);
+    delay(relaisDelay);
+    digitalWrite(RELAY_PIETON, RELAIS_REPOS);
+    request->send(200, "text/plain", "Piéton activé !");
   });
 
-  server.on("/get-users", HTTP_GET, [](AsyncWebServerRequest *request) {
-    File file = SPIFFS.open("/users.json", "r");
-    if (!file) {
-      request->send(500, "application/json", "{}");
-      return;
-    }
-    StaticJsonDocument<1024> doc;
-    deserializeJson(doc, file);
-    file.close();
-    String output;
-    serializeJson(doc, output);
-    request->send(200, "application/json", output);
+  server.on("/voiture", HTTP_GET, [](AsyncWebServerRequest *request) {
+    digitalWrite(RELAY_VOITURE, RELAIS_ACTIVE);
+    delay(relaisDelay);
+    digitalWrite(RELAY_VOITURE, RELAIS_REPOS);
+    request->send(200, "text/plain", "Voiture activée !");
   });
 
-  server.on("/delete-user", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (!request->hasParam("name")) {
-      request->send(400, "text/plain", "Paramètre manquant");
-      return;
-    }
-    String userToDelete = request->getParam("name")->value();
-    File file = SPIFFS.open("/users.json", "r");
-    if (!file) {
-      request->send(500, "text/plain", "Fichier introuvable");
-      return;
-    }
-    StaticJsonDocument<1024> doc;
-    deserializeJson(doc, file);
-    file.close();
-    doc.remove(userToDelete);
-    file = SPIFFS.open("/users.json", "w");
-    serializeJsonPretty(doc, file);
-    file.close();
-    request->redirect("/users");
+  server.on("/etat", HTTP_GET, [](AsyncWebServerRequest *request) {
+    bool ferme = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
+    request->send(200, "text/plain", ferme ? "ferme" : "ouvert");
   });
-server.on("/upload.html", HTTP_GET, [](AsyncWebServerRequest *request) {
-  request->send(SPIFFS, "/upload.html", "text/html");
-});
+
 
   server.begin();
 }
 
 void loop() {
   ArduinoOTA.handle();
+
+  static bool etatPrec = false;
+  bool etatActuel = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
+
+  static unsigned long tempsOuverture = 0;
+  static bool alerteEnvoyee = false;
+
+  if (etatActuel != etatPrec) {
+    String etatStr = etatActuel ? "ferme" : "ouvert";
+    logEtatPortail(etatStr);
+    if (notifOuverture) notifierPortailOuvert();
+    etatPrec = etatActuel;
+    if (!etatActuel) {
+      tempsOuverture = millis();
+      alerteEnvoyee = false;
+    }
+  }
+
+  if (!etatActuel && notifRappel && !alerteEnvoyee &&
+      millis() - tempsOuverture > (unsigned long)(delaiRappelMinutes * 60000)) {
+    notifierPortailOuvert();
+    alerteEnvoyee = true;
+  }
+
+  delay(500);
 }

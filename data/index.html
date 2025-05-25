@@ -19,7 +19,27 @@
     }
 
     h1 {
+      margin-bottom: 10px;
+    }
+
+    #etatPortail {
+      font-size: 22px;
       margin-bottom: 30px;
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-weight: bold;
+    }
+
+    .ferme {
+      background-color: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .ouvert {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
     }
 
     button {
@@ -54,10 +74,13 @@
 <body>
   <h1>Contrôle du Portail</h1>
 
+  <div id="etatPortail" class="ouvert">Lecture de l'état...</div>
+
   <button onclick="ouvrirPieton()">🚶 Mode Piéton</button>
   <button onclick="ouvrirVoiture()">🚗 Mode Voiture</button>
 
   <a href="/settings">⚙️ Paramètres</a>
+  
 
   <script>
     function ouvrirPieton() {
@@ -75,6 +98,29 @@
         alert("Erreur lors de l'envoi de la commande voiture");
       });
     }
+
+    function majEtatPortail() {
+      fetch('/etat')
+        .then(response => response.text())
+        .then(etat => {
+          const zone = document.getElementById("etatPortail");
+          if (etat.trim() === "ferme") {
+            zone.textContent = "🔒 Portail fermé";
+            zone.className = "ferme";
+          } else {
+            zone.textContent = "🚪 Portail non fermé";
+            zone.className = "ouvert";
+          }
+        })
+        .catch(() => {
+          const zone = document.getElementById("etatPortail");
+          zone.textContent = "❌ Erreur de lecture";
+          zone.className = "ouvert";
+        });
+    }
+
+    majEtatPortail();
+    setInterval(majEtatPortail, 2000);
   </script>
 </body>
 </html>
