@@ -9,7 +9,6 @@
 #include "wifi_manager.h"
 #include <time.h>
 #include <HTTPClient.h>
-#include <WiFiClientSecure.h>
 #include <esp_task_wdt.h>
 
 #if __has_include("config.h")
@@ -31,11 +30,12 @@
 #define DAILY_RESTART_MIN 0
 #define WATCHDOG_TIMEOUT 30
 #define WEATHER_UPDATE_INTERVAL 900000UL
+#define WEATHER_RETRY_INTERVAL 60000UL
 #define WEATHER_HTTP_TIMEOUT_MS 4000
 #define WEATHER_TASK_STACK_SIZE 8192
 
 const char *WEATHER_URL =
-  "https://api.open-meteo.com/v1/forecast"
+  "http://api.open-meteo.com/v1/forecast"
   "?latitude=43.1242&longitude=5.9280"
   "&current=temperature_2m,apparent_temperature,weather_code"
   "&timezone=Europe%2FParis&forecast_days=1";
@@ -155,8 +155,7 @@ void recupererMeteoTask(void *parameter) {
     return;
   }
 
-  WiFiClientSecure client;
-  client.setInsecure();
+  WiFiClient client;
   client.setTimeout(WEATHER_HTTP_TIMEOUT_MS);
 
   HTTPClient http;
@@ -204,7 +203,7 @@ void recupererMeteoTask(void *parameter) {
 
     http.end();
   } else {
-    Serial.println("[Weather] Initialisation HTTPS impossible");
+    Serial.println("[Weather] Initialisation HTTP impossible");
   }
 
   if (!updated) {
@@ -222,8 +221,12 @@ void gererMeteo() {
   bool startRequest = false;
 
   portENTER_CRITICAL(&weatherMux);
+  const unsigned long interval = weather.valid
+    ? WEATHER_UPDATE_INTERVAL
+    : WEATHER_RETRY_INTERVAL;
+
   if (!weatherRequestInProgress &&
-      (!weatherHasAttempted || now - weatherLastAttemptAt >= WEATHER_UPDATE_INTERVAL)) {
+      (!weatherHasAttempted || now - weatherLastAttemptAt >= interval)) {
     weatherRequestInProgress = true;
     weatherHasAttempted = true;
     weatherLastAttemptAt = now;

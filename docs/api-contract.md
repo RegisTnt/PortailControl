@@ -73,7 +73,7 @@ Les fichiers web contiennent encore des appels ou formulaires vers `POST /enrol`
 ## Services non HTTP et reprise après erreur
 
 - Wi-Fi : identifiants stockés dans Preferences ; tentative initiale de 10 s, puis point d'accès `Portail_Config`; auto-reconnexion ESP32 et contrôle toutes les 10 s.
-- Météo : tâche FreeRTOS indépendante après connexion Wi-Fi, puis toutes les 15 minutes. Open-Meteo est interrogé pour Toulon (`43.1242`, `5.9280`) avec un timeout de 4 s. Un échec conserve la dernière valeur valide et n'interagit jamais avec les relais.
+- Météo : tâche FreeRTOS indépendante après connexion Wi-Fi, puis toutes les 15 minutes après un succès. Tant qu'aucune valeur valide n'existe, une tentative est refaite après 1 minute. Open-Meteo est interrogé pour Toulon (`43.1242`, `5.9280`) avec un timeout de 4 s. Un échec conserve la dernière valeur valide et n'interagit jamais avec les relais.
 - mDNS : `portail.local`.
 - OTA Arduino : hostname `portail-esp32`, mot de passe local dans `include/config.h`.
 - Watchdog : 30 s, alimenté dans `loop()`.
