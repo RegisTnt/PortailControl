@@ -70,6 +70,7 @@ portMUX_TYPE weatherMux = portMUX_INITIALIZER_UNLOCKED;
 bool weatherRequestInProgress = false;
 bool weatherHasAttempted = false;
 unsigned long weatherLastAttemptAt = 0;
+int weatherLastError = 0;
 
 // -------------------------
 // Logs
@@ -146,10 +147,17 @@ void terminerRequeteMeteo() {
   portEXIT_CRITICAL(&weatherMux);
 }
 
+void definirErreurMeteo(int errorCode) {
+  portENTER_CRITICAL(&weatherMux);
+  weatherLastError = errorCode;
+  portEXIT_CRITICAL(&weatherMux);
+}
+
 void recupererMeteoTask(void *parameter) {
   (void)parameter;
 
   if (WiFi.status() != WL_CONNECTED) {
+    definirErreurMeteo(-100);
     terminerRequeteMeteo();
     vTaskDelete(nullptr);
     return;
@@ -168,8 +176,9 @@ void recupererMeteoTask(void *parameter) {
     const int httpCode = http.GET();
 
     if (httpCode == HTTP_CODE_OK) {
+      const String payload = http.getString();
       JsonDocument doc;
-      DeserializationError error = deserializeJson(doc, http.getStream());
+      DeserializationError error = deserializeJson(doc, payload);
       JsonObject current = doc["current"];
 
       if (!error &&
@@ -189,20 +198,24 @@ void recupererMeteoTask(void *parameter) {
         weather.weatherCode = code;
         weather.fetchedAtMs = millis();
         strlcpy(weather.observedAt, observedAt, sizeof(weather.observedAt));
+        weatherLastError = 0;
         portEXIT_CRITICAL(&weatherMux);
 
         updated = true;
         Serial.printf("[Weather] Toulon %.1f C, ressenti %.1f C, code %d\n",
                       temperature, apparent, code);
       } else {
+        definirErreurMeteo(error ? -102 : -103);
         Serial.println("[Weather] Reponse JSON invalide");
       }
     } else {
+      definirErreurMeteo(httpCode);
       Serial.printf("[Weather] Echec HTTP : %d\n", httpCode);
     }
 
     http.end();
   } else {
+    definirErreurMeteo(-101);
     Serial.println("[Weather] Initialisation HTTP impossible");
   }
 
@@ -388,13 +401,16 @@ void declarerRoutesActions() {
 void declarerRouteMeteo() {
   server.on("/api/weather", HTTP_GET, [](AsyncWebServerRequest *request) {
     WeatherSnapshot snapshot;
+    int lastError;
 
     portENTER_CRITICAL(&weatherMux);
     snapshot = weather;
+    lastError = weatherLastError;
     portEXIT_CRITICAL(&weatherMux);
 
     JsonDocument response;
     response["available"] = snapshot.valid;
+    response["last_error"] = lastError;
 
     if (snapshot.valid) {
       response["temperature_2m"] = snapshot.temperature;
