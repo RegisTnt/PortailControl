@@ -6,6 +6,9 @@ const STATE_REFRESH_DELAY_MS = 1200;
 
 const elements = {
   network: document.querySelector('#networkBadge'),
+  weatherTemperature: document.querySelector('#weatherTemperature'),
+  weatherDetail: document.querySelector('#weatherDetail'),
+  weatherAge: document.querySelector('#weatherAge'),
   status: document.querySelector('#gateStatus'),
   detail: document.querySelector('#statusDetail'),
   refreshed: document.querySelector('#lastRefresh'),
@@ -20,6 +23,8 @@ const elements = {
 let commandLocked = false;
 let portalReachable = false;
 let installPrompt = null;
+let weatherAgeAtFetch = null;
+let weatherReceivedAt = 0;
 
 async function directFetch(path) {
   if (!navigator.onLine) throw new Error('Le navigateur est hors ligne. Commande non envoyée.');
@@ -43,6 +48,62 @@ function setNetwork(kind, label) {
 function showMessage(text, kind = '') {
   elements.message.className = kind ? `message message-${kind}` : 'message';
   elements.message.textContent = text;
+}
+
+function weatherLabel(code) {
+  if (code === 0) return 'Ciel dégagé';
+  if ([1, 2, 3].includes(code)) return 'Nuageux';
+  if ([45, 48].includes(code)) return 'Brouillard';
+  if (code >= 51 && code <= 57) return 'Bruine';
+  if (code >= 61 && code <= 67) return 'Pluie';
+  if (code >= 71 && code <= 77) return 'Neige';
+  if (code >= 80 && code <= 82) return 'Averses';
+  if (code >= 85 && code <= 86) return 'Averses de neige';
+  if (code >= 95 && code <= 99) return 'Orage';
+  return `Code météo ${code}`;
+}
+
+function formatWeatherAge(seconds) {
+  if (seconds < 60) return 'Donnée âgée de moins d’une minute';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `Donnée âgée de ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `Donnée âgée de ${hours} h ${remainingMinutes} min`;
+}
+
+function updateWeatherAge() {
+  if (weatherAgeAtFetch === null) return;
+  const elapsed = Math.floor((Date.now() - weatherReceivedAt) / 1000);
+  elements.weatherAge.textContent = formatWeatherAge(weatherAgeAtFetch + elapsed);
+}
+
+async function refreshWeather() {
+  try {
+    const response = await directFetch('/api/weather');
+    const data = await response.json();
+    const temperature = Number(data.temperature_2m);
+    const apparent = Number(data.apparent_temperature);
+    const code = Number(data.weather_code);
+    const age = Number(data.age_seconds);
+
+    if (!response.ok || !data.available ||
+        !Number.isFinite(temperature) || !Number.isFinite(apparent) ||
+        !Number.isInteger(code) || !Number.isFinite(age)) {
+      throw new Error('Aucune donnée météo valide.');
+    }
+
+    elements.weatherTemperature.textContent = `${temperature.toFixed(1)} °C`;
+    elements.weatherDetail.textContent = `Ressenti ${apparent.toFixed(1)} °C · ${weatherLabel(code)}`;
+    weatherAgeAtFetch = Math.max(0, Math.floor(age));
+    weatherReceivedAt = Date.now();
+    updateWeatherAge();
+  } catch (error) {
+    elements.weatherTemperature.textContent = 'Météo indisponible';
+    elements.weatherDetail.textContent = 'Aucune valeur valide en mémoire.';
+    elements.weatherAge.textContent = 'Aucune donnée météo';
+    weatherAgeAtFetch = null;
+  }
 }
 
 async function refreshState() {
@@ -142,3 +203,6 @@ if ('serviceWorker' in navigator) {
 }
 
 refreshState();
+refreshWeather();
+setInterval(refreshWeather, 60000);
+setInterval(updateWeatherAge, 30000);

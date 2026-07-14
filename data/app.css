@@ -24,7 +24,10 @@ h2 { margin: 0 0 .5rem; font-size: 1.2rem; }
 .badge-ok { background: rgba(54, 213, 118, .16); color: var(--green); }
 .badge-warn { background: rgba(255, 184, 77, .16); color: var(--orange); }
 .badge-error { background: rgba(255, 101, 119, .16); color: var(--red); }
-.status-card, .command-card { padding: 1.15rem; margin-bottom: 1rem; border: 1px solid rgba(255,255,255,.1); border-radius: 1.25rem; background: rgba(13, 41, 72, .95); box-shadow: 0 1rem 2.5rem rgba(0,0,0,.22); }
+.weather-card, .status-card, .command-card { padding: 1.15rem; margin-bottom: 1rem; border: 1px solid rgba(255,255,255,.1); border-radius: 1.25rem; background: rgba(13, 41, 72, .95); box-shadow: 0 1rem 2.5rem rgba(0,0,0,.22); }
+.weather-card { background: linear-gradient(145deg, rgba(18, 81, 160, .92), rgba(13, 41, 72, .96)); }
+.weather-temperature { margin: .45rem 0; color: #fff; font-size: clamp(1.8rem, 9vw, 2.7rem); font-weight: 900; }
+.weather-card p { margin-bottom: .4rem; }
 .gate-status { margin: .55rem 0; font-size: clamp(1.7rem, 9vw, 2.5rem); font-weight: 900; }
 .status-closed { color: var(--green); }
 .status-open { color: var(--red); }

@@ -9,6 +9,7 @@
 #include "wifi_manager.h"
 #include <time.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <esp_task_wdt.h>
 
 #if __has_include("config.h")
@@ -29,6 +30,15 @@
 #define DAILY_RESTART_HOUR 3
 #define DAILY_RESTART_MIN 0
 #define WATCHDOG_TIMEOUT 30
+#define WEATHER_UPDATE_INTERVAL 900000UL
+#define WEATHER_HTTP_TIMEOUT_MS 4000
+#define WEATHER_TASK_STACK_SIZE 8192
+
+const char *WEATHER_URL =
+  "https://api.open-meteo.com/v1/forecast"
+  "?latitude=43.1242&longitude=5.9280"
+  "&current=temperature_2m,apparent_temperature,weather_code"
+  "&timezone=Europe%2FParis&forecast_days=1";
 
 AsyncWebServer server(80);
 Preferences prefs;
@@ -45,6 +55,21 @@ unsigned long relaisStartTime = 0;
 
 bool relaisActif = false;
 int relaisEnCours = -1;
+
+struct WeatherSnapshot {
+  bool valid;
+  float temperature;
+  float apparentTemperature;
+  int weatherCode;
+  unsigned long fetchedAtMs;
+  char observedAt[25];
+};
+
+WeatherSnapshot weather = {false, 0.0f, 0.0f, -1, 0, ""};
+portMUX_TYPE weatherMux = portMUX_INITIALIZER_UNLOCKED;
+bool weatherRequestInProgress = false;
+bool weatherHasAttempted = false;
+unsigned long weatherLastAttemptAt = 0;
 
 // -------------------------
 // Logs
@@ -110,6 +135,117 @@ void notifierPortailOuvert() {
   }
 
   http.end();
+}
+
+// -------------------------
+// Meteo Open-Meteo (tache reseau independante)
+// -------------------------
+void terminerRequeteMeteo() {
+  portENTER_CRITICAL(&weatherMux);
+  weatherRequestInProgress = false;
+  portEXIT_CRITICAL(&weatherMux);
+}
+
+void recupererMeteoTask(void *parameter) {
+  (void)parameter;
+
+  if (WiFi.status() != WL_CONNECTED) {
+    terminerRequeteMeteo();
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(WEATHER_HTTP_TIMEOUT_MS);
+
+  HTTPClient http;
+  http.setConnectTimeout(WEATHER_HTTP_TIMEOUT_MS);
+  http.setTimeout(WEATHER_HTTP_TIMEOUT_MS);
+
+  bool updated = false;
+
+  if (http.begin(client, WEATHER_URL)) {
+    const int httpCode = http.GET();
+
+    if (httpCode == HTTP_CODE_OK) {
+      JsonDocument doc;
+      DeserializationError error = deserializeJson(doc, http.getStream());
+      JsonObject current = doc["current"];
+
+      if (!error &&
+          current["temperature_2m"].is<float>() &&
+          current["apparent_temperature"].is<float>() &&
+          current["weather_code"].is<int>() &&
+          current["time"].is<const char *>()) {
+        const float temperature = current["temperature_2m"].as<float>();
+        const float apparent = current["apparent_temperature"].as<float>();
+        const int code = current["weather_code"].as<int>();
+        const char *observedAt = current["time"].as<const char *>();
+
+        portENTER_CRITICAL(&weatherMux);
+        weather.valid = true;
+        weather.temperature = temperature;
+        weather.apparentTemperature = apparent;
+        weather.weatherCode = code;
+        weather.fetchedAtMs = millis();
+        strlcpy(weather.observedAt, observedAt, sizeof(weather.observedAt));
+        portEXIT_CRITICAL(&weatherMux);
+
+        updated = true;
+        Serial.printf("[Weather] Toulon %.1f C, ressenti %.1f C, code %d\n",
+                      temperature, apparent, code);
+      } else {
+        Serial.println("[Weather] Reponse JSON invalide");
+      }
+    } else {
+      Serial.printf("[Weather] Echec HTTP : %d\n", httpCode);
+    }
+
+    http.end();
+  } else {
+    Serial.println("[Weather] Initialisation HTTPS impossible");
+  }
+
+  if (!updated) {
+    Serial.println("[Weather] Derniere valeur valide conservee");
+  }
+
+  terminerRequeteMeteo();
+  vTaskDelete(nullptr);
+}
+
+void gererMeteo() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  const unsigned long now = millis();
+  bool startRequest = false;
+
+  portENTER_CRITICAL(&weatherMux);
+  if (!weatherRequestInProgress &&
+      (!weatherHasAttempted || now - weatherLastAttemptAt >= WEATHER_UPDATE_INTERVAL)) {
+    weatherRequestInProgress = true;
+    weatherHasAttempted = true;
+    weatherLastAttemptAt = now;
+    startRequest = true;
+  }
+  portEXIT_CRITICAL(&weatherMux);
+
+  if (!startRequest) return;
+
+  const BaseType_t result = xTaskCreate(
+    recupererMeteoTask,
+    "open-meteo",
+    WEATHER_TASK_STACK_SIZE,
+    nullptr,
+    1,
+    nullptr
+  );
+
+  if (result != pdPASS) {
+    Serial.println("[Weather] Creation de la tache impossible");
+    terminerRequeteMeteo();
+  }
 }
 
 // -------------------------
@@ -243,6 +379,31 @@ void declarerRoutesActions() {
   server.on("/etat", HTTP_GET, [](AsyncWebServerRequest *request) {
     bool ferme = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
     request->send(200, "text/plain", ferme ? "ferme" : "ouvert");
+  });
+}
+
+void declarerRouteMeteo() {
+  server.on("/api/weather", HTTP_GET, [](AsyncWebServerRequest *request) {
+    WeatherSnapshot snapshot;
+
+    portENTER_CRITICAL(&weatherMux);
+    snapshot = weather;
+    portEXIT_CRITICAL(&weatherMux);
+
+    JsonDocument response;
+    response["available"] = snapshot.valid;
+
+    if (snapshot.valid) {
+      response["temperature_2m"] = snapshot.temperature;
+      response["apparent_temperature"] = snapshot.apparentTemperature;
+      response["weather_code"] = snapshot.weatherCode;
+      response["observed_at"] = snapshot.observedAt;
+      response["age_seconds"] = (millis() - snapshot.fetchedAtMs) / 1000UL;
+    }
+
+    String payload;
+    serializeJson(response, payload);
+    request->send(snapshot.valid ? 200 : 503, "application/json", payload);
   });
 }
 
@@ -484,6 +645,7 @@ void setup() {
 
   declarerRoutesPages();
   declarerRoutesActions();
+  declarerRouteMeteo();
   declarerRoutesParametres();
   declarerRoutesLogs();
   declarerRoutesUtilisateurs();
@@ -507,6 +669,7 @@ void loop() {
   ArduinoOTA.handle();
 
   gererRelais();
+  gererMeteo();
 
   if (millis() - lastWifiCheck >= WIFI_CHECK_INTERVAL) {
     lastWifiCheck = millis();

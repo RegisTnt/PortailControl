@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'portailcontrol-static-v2';
+const CACHE_NAME = 'portailcontrol-static-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -12,7 +12,7 @@ const STATIC_ASSETS = [
 ];
 
 const NETWORK_ONLY_PATHS = new Set([
-  '/etat', '/pieton', '/voiture', '/historique', '/log.txt', '/clear-log',
+  '/etat', '/api/weather', '/pieton', '/voiture', '/historique', '/log.txt', '/clear-log',
   '/set-delay', '/set-notifications', '/save', '/delete-user', '/get-users',
   '/users.json', '/download-users', '/enrol', '/admin', '/users', '/settings',
   '/wifi_config', '/upload', '/upload.html', '/enrol.html'

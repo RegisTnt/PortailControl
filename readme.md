@@ -18,6 +18,7 @@ Le firmware utilise ESPAsyncWebServer, AsyncTCP, ArduinoJson, SPIFFS, Preference
 
 L'interface principale est une Progressive Web App sans CDN ni dépendance Internet. Elle fournit :
 
+- météo actuelle de Toulon via Open-Meteo : température réelle, température ressentie, code météo et âge de la mesure ;
 - état du capteur et heure de dernière actualisation ;
 - gros boutons tactiles pour l'impulsion piétonne et l'impulsion complète ;
 - confirmation explicite, timeout de 5 s et anti-double-appui de 3 s ;
@@ -25,7 +26,9 @@ L'interface principale est une Progressive Web App sans CDN ni dépendance Inter
 - distinction entre réception HTTP et état physique confirmé ;
 - manifeste, service worker et icônes 192/512 px.
 
-Le service worker met uniquement en cache la coquille statique (`index.html`, CSS, JavaScript, manifeste et icônes). Les routes d'état, de commande, d'historique, de journal et d'administration restent réseau uniquement. Hors ligne, l'interface peut s'afficher, mais une commande échoue immédiatement et n'est jamais rejouée plus tard.
+Le service worker met uniquement en cache la coquille statique (`index.html`, CSS, JavaScript, manifeste et icônes). Les routes d'état, de météo, de commande, d'historique, de journal et d'administration restent réseau uniquement. Hors ligne, l'interface peut s'afficher, mais une commande échoue immédiatement et n'est jamais rejouée plus tard.
+
+La météo est récupérée sans clé API dans une tâche réseau séparée après la connexion Wi-Fi, puis toutes les 15 minutes. L'appel HTTPS utilise un timeout de 4 s et ne bloque jamais la boucle de commande du portail. La dernière valeur valide reste disponible en RAM si Internet ou Open-Meteo deviennent indisponibles. Après un redémarrage, l'interface affiche **Météo indisponible** jusqu'au premier succès.
 
 > L'installation PWA exige normalement un contexte sécurisé. Les navigateurs acceptent `localhost`, mais une adresse HTTP privée servie directement par l'ESP32 peut ne pas proposer l'installation selon le navigateur et sa version. Le manifeste et le service worker restent utilisables dès que le contexte est accepté.
 
@@ -49,27 +52,29 @@ Les secrets qui étaient auparavant présents dans l'historique Git doivent êtr
 Installer PlatformIO, puis depuis la racine :
 
 ```powershell
-pio run
-pio run --target buildfs
+pio run -e esp32dev_usb
+pio run -e esp32dev_usb --target buildfs
 ```
 
 Le premier appel compile le firmware ; le second construit l'image SPIFFS avec la PWA.
 
 ## Téléversement
 
-Pour un téléversement OTA, ajouter localement sous `[env:esp32dev]` les lignes de `platformio.local.example.ini` (sans les committer), puis lancer :
+Pour un téléversement OTA sur le réseau local, définir temporairement dans le terminal le même mot de passe que `PORTAL_OTA_PASSWORD` dans `include/config.h`, puis utiliser l'environnement `esp32dev_ota` :
 
 ```powershell
-pio run --target upload
+$env:PORTAL_OTA_PASSWORD = "votre-mot-de-passe-local"
+pio run -e esp32dev_ota --target upload
 ```
 
 Fichiers web SPIFFS :
 
 ```powershell
-pio run --target uploadfs
+pio run -e esp32dev_ota --target uploadfs
+Remove-Item Env:PORTAL_OTA_PASSWORD
 ```
 
-Remplacer l'adresse d'exemple par l'adresse LAN de l'ESP32. Le mot de passe OTA vient de `include/config.h`. Le téléversement est une opération humaine ; il n'est pas exécuté par les tests automatiques.
+L'environnement utilise `portail.local`. Le téléversement est une opération humaine ; il n'est pas exécuté par les tests automatiques. Attention : `uploadfs` remplace l'image SPIFFS et nécessite une sauvegarde préalable des données dynamiques.
 
 ## Sécurité et limites connues
 

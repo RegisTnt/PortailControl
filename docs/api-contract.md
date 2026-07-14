@@ -18,6 +18,7 @@ Niveaux de danger utilisés : **faible** (lecture), **modéré** (données/confi
 | Méthode | Chemin | Rôle et paramètres | Réponse, MIME et exemple | Codes observables | Répétition et temporisation |
 |---|---|---|---|---|---|
 | GET | `/etat` | Lit `GPIO 34`. Aucun paramètre. | `text/plain`, `ferme` ou `ouvert`. | 200. | Faible, répétable. 1 s minimum recommandé pour un client interactif. Réseau direct, jamais de cache. |
+| GET | `/api/weather` | Lit la dernière météo valide de Toulon conservée en RAM. Aucun accès Internet n'est déclenché par cette route. | `application/json`. Disponible : `{"available":true,"temperature_2m":27.3,"apparent_temperature":28.1,"weather_code":1,"observed_at":"2026-07-14T17:15","age_seconds":42}`. Indisponible : `{"available":false}`. | 200 avec une valeur valide, 503 avant le premier succès. | Faible, répétable. Réseau direct, jamais de cache. Les données sont perdues au redémarrage puis récupérées après connexion Wi-Fi. |
 | GET | `/log.txt` | Lit le journal SPIFFS. | `text/plain`, ex. `Horodatage;État\n2026-07-14 10:20:30;ferme`. En-tête `Content-Disposition: inline`. | 200, 404 si absent, 500 si ouverture impossible. | Faible, répétable sur action utilisateur. Réseau direct, jamais de cache. |
 | GET | `/get-users` | Lit la table JSON des utilisateurs. | `application/json`, `{}` si le fichier n'existe pas. | 200. | Modéré : expose les jetons éventuels. Pas de polling. |
 | GET | `/users.json` | Lit directement la table JSON. | `application/json`, ex. `{}`. | 200, ou 404 avec `{}`. | Modéré : expose les jetons éventuels. Pas de cache. |
@@ -72,6 +73,7 @@ Les fichiers web contiennent encore des appels ou formulaires vers `POST /enrol`
 ## Services non HTTP et reprise après erreur
 
 - Wi-Fi : identifiants stockés dans Preferences ; tentative initiale de 10 s, puis point d'accès `Portail_Config`; auto-reconnexion ESP32 et contrôle toutes les 10 s.
+- Météo : tâche FreeRTOS indépendante après connexion Wi-Fi, puis toutes les 15 minutes. Open-Meteo est interrogé pour Toulon (`43.1242`, `5.9280`) avec un timeout de 4 s. Un échec conserve la dernière valeur valide et n'interagit jamais avec les relais.
 - mDNS : `portail.local`.
 - OTA Arduino : hostname `portail-esp32`, mot de passe local dans `include/config.h`.
 - Watchdog : 30 s, alimenté dans `loop()`.
