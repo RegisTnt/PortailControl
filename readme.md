@@ -26,6 +26,14 @@ L'interface principale est une Progressive Web App sans CDN ni dépendance Inter
 - distinction entre réception HTTP et état physique confirmé ;
 - manifeste, service worker et icônes 192/512 px.
 
+La nouvelle interface adopte un thème « vacances d'été méditerranéennes » entièrement réalisé en CSS et SVG inline : bleu profond, azur, turquoise, jaune solaire, sable clair et cartes blanches. Une page unique regroupe trois vues accessibles par une navigation inférieure fixe :
+
+- **Accueil** compact : connexion, météo, capteur, deux commandes et rappel de sécurité ;
+- **Historique** : lecture réseau de `log.txt`, regroupement par date et cartes d'événements ;
+- **Réglages** : accès aux pages Paramètres, Wi-Fi, Utilisateurs et Administration.
+
+L'accueil est dimensionné pour rester sans défilement sur les smartphones courants de 360 × 800 à 412 × 915. Le mode compact prend en charge les écrans plus courts, tandis que les tablettes utilisent une largeur limitée et des grilles à deux colonnes. Les safe areas, `100dvh`, le mode paysage, le clavier, les zones tactiles de 48 px et `prefers-reduced-motion` sont pris en compte.
+
 Le service worker met uniquement en cache la coquille statique (`index.html`, CSS, JavaScript, manifeste et icônes). Les routes d'état, de météo, de commande, d'historique, de journal et d'administration restent réseau uniquement. Hors ligne, l'interface peut s'afficher, mais une commande échoue immédiatement et n'est jamais rejouée plus tard.
 
 La météo est récupérée sans clé API dans une tâche réseau séparée après la connexion Wi-Fi, puis toutes les 15 minutes. Tant qu'aucune valeur valide n'existe, une nouvelle tentative est faite après 1 minute. L'appel HTTP utilise un timeout de 4 s et ne bloque jamais la boucle de commande du portail. La dernière valeur valide reste disponible en RAM si Internet ou Open-Meteo deviennent indisponibles. Après un redémarrage, l'interface affiche **Météo indisponible** jusqu'au premier succès.
