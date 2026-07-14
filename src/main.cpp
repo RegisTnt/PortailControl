@@ -9,81 +9,180 @@
 #include "wifi_manager.h"
 #include <time.h>
 #include <HTTPClient.h>
+#include <esp_task_wdt.h>
+
+#if __has_include("config.h")
+#include "config.h"
+#else
+#include "config.example.h"
+#endif
 
 #define RELAY_PIETON 16
 #define RELAY_VOITURE 17
 #define PIN_CAPTEUR_FERME 34
+
 #define RELAIS_REPOS LOW
 #define RELAIS_ACTIVE HIGH
-#define WIFI_MAISON "Bbox-69ABA8B3"
 
-AsyncWebServer server(80);  // seule définition ici
+#define WIFI_CHECK_INTERVAL 10000
+#define KEEPALIVE_INTERVAL 60000
+#define DAILY_RESTART_HOUR 3
+#define DAILY_RESTART_MIN 0
+#define WATCHDOG_TIMEOUT 30
+
+AsyncWebServer server(80);
 Preferences prefs;
 
-String enrolPassword = "changemoi";
+String enrolPassword = PORTAL_DEFAULT_ENROL_PASSWORD;
 int relaisDelay = 500;
 bool notifOuverture = false;
 bool notifRappel = false;
 int delaiRappelMinutes = 10;
 
+unsigned long lastWifiCheck = 0;
+unsigned long lastKeepAlive = 0;
+unsigned long relaisStartTime = 0;
+
+bool relaisActif = false;
+int relaisEnCours = -1;
+
+// -------------------------
+// Logs
+// -------------------------
 void logEtatPortail(const String &etat) {
   time_t now = time(nullptr);
   struct tm *timeinfo = localtime(&now);
-  char timestamp[20];
-  strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+
+  char timestamp[24];
+
+  if (timeinfo) {
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+  } else {
+    strcpy(timestamp, "1970-01-01 00:00:00");
+  }
+
   File log = SPIFFS.open("/log.txt", FILE_APPEND);
+
   if (log) {
     log.printf("%s;%s\n", timestamp, etat.c_str());
     log.close();
     Serial.printf("📝 Log : %s;%s\n", timestamp, etat.c_str());
+  } else {
+    Serial.println("❌ Impossible d'écrire dans /log.txt");
   }
 }
 
-void notifierPortailOuvert() {
-  HTTPClient http;
-  http.begin("https://maker.ifttt.com/trigger/portail_ouvert/with/key/ISeQ-N0oT9SG2bYB4N27h");
-  int httpCode = http.GET();
-  if (httpCode > 0) Serial.println("🔔 Notification IFTTT envoyée !");
-  else Serial.printf("❌ Erreur IFTTT : %d\n", httpCode);
-  http.end();
-}
-
-void setup() {
-  Serial.begin(115200);
-  if (!SPIFFS.begin(true)) return;
-
+void initialiserLog() {
   if (!SPIFFS.exists("/log.txt")) {
     File log = SPIFFS.open("/log.txt", FILE_WRITE);
+
     if (log) {
       log.println("Horodatage;État");
       log.close();
+      Serial.println("✅ /log.txt créé");
+    } else {
+      Serial.println("❌ Impossible de créer /log.txt");
     }
   }
+}
 
-  prefs.begin("portail", false);
-  relaisDelay = prefs.getInt("delai", 500);
-  enrolPassword = prefs.getString("enrol_pwd", "changemoi");
-  notifOuverture = prefs.getBool("notif_ouverture", false);
-  notifRappel = prefs.getBool("notif_rappel", false);
-  delaiRappelMinutes = prefs.getInt("rappel_minutes", 10);
-  prefs.end();
+// -------------------------
+// Notification IFTTT
+// -------------------------
+void notifierPortailOuvert() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("❌ IFTTT impossible : WiFi non connecté");
+    logEtatPortail("notification_ifttt_echec_wifi");
+    return;
+  }
 
-  setupWiFi();  // appel défini dans wifi_manager.cpp
-  configTime(3600, 0, "pool.ntp.org", "time.nist.gov");
+  HTTPClient http;
+  http.begin(PORTAL_IFTTT_URL);
 
-  if (MDNS.begin("portail")) Serial.println("http://portail.local");
+  int httpCode = http.GET();
 
-  ArduinoOTA.setHostname("portail-esp32");
-  ArduinoOTA.setPassword("changemoi");
-  ArduinoOTA.begin();
+  if (httpCode > 0) {
+    Serial.println("🔔 Notification IFTTT envoyée !");
+    logEtatPortail("notification_ifttt_envoyee");
+  } else {
+    Serial.printf("❌ Erreur IFTTT : %d\n", httpCode);
+    logEtatPortail("notification_ifttt_erreur");
+  }
 
-  pinMode(RELAY_PIETON, OUTPUT);
-  pinMode(RELAY_VOITURE, OUTPUT);
-  pinMode(PIN_CAPTEUR_FERME, INPUT);
-  digitalWrite(RELAY_PIETON, RELAIS_REPOS);
-  digitalWrite(RELAY_VOITURE, RELAIS_REPOS);
+  http.end();
+}
 
-  // === Routes
+// -------------------------
+// WiFi
+// -------------------------
+void reconnectWiFiIfNeeded() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[WiFi] Perdu, tentative de reconnexion...");
+    logEtatPortail("wifi_perdu_reconnexion");
+    WiFi.disconnect();
+    WiFi.reconnect();
+  }
+}
+
+void keepAliveLog() {
+  Serial.printf("[KeepAlive] WiFi status: %d, IP: %s\n",
+                WiFi.status(),
+                WiFi.localIP().toString().c_str());
+}
+
+// -------------------------
+// Redémarrage quotidien
+// -------------------------
+void redemarrageQuotidien() {
+  static bool dejaRedemarreCetteMinute = false;
+
+  time_t now = time(nullptr);
+  struct tm *timeinfo = localtime(&now);
+
+  if (!timeinfo) return;
+
+  if (timeinfo->tm_hour == DAILY_RESTART_HOUR && timeinfo->tm_min == DAILY_RESTART_MIN) {
+    if (!dejaRedemarreCetteMinute) {
+      dejaRedemarreCetteMinute = true;
+      logEtatPortail("redemarrage_quotidien");
+      Serial.println("[System] Redémarrage quotidien à 3h00...");
+      delay(1000);
+      ESP.restart();
+    }
+  } else {
+    dejaRedemarreCetteMinute = false;
+  }
+}
+
+// -------------------------
+// Relais non bloquants
+// -------------------------
+void activerRelais(int pin) {
+  if (relaisActif) {
+    Serial.println("⚠️ Relais déjà actif, commande ignorée");
+    logEtatPortail("commande_ignoree_relais_deja_actif");
+    return;
+  }
+
+  relaisEnCours = pin;
+  relaisStartTime = millis();
+  relaisActif = true;
+
+  digitalWrite(pin, RELAIS_ACTIVE);
+}
+
+void gererRelais() {
+  if (relaisActif && millis() - relaisStartTime >= (unsigned long)relaisDelay) {
+    digitalWrite(relaisEnCours, RELAIS_REPOS);
+    relaisActif = false;
+    relaisEnCours = -1;
+  }
+}
+
+// -------------------------
+// Routes pages HTML
+// -------------------------
+void declarerRoutesPages() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(SPIFFS, "/index.html", "text/html");
   });
@@ -92,41 +191,52 @@ void setup() {
     request->send(SPIFFS, "/settings.html", "text/html");
   });
 
-  server.on("/set-delay", HTTP_POST, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("delai", true)) {
-      relaisDelay = request->getParam("delai", true)->value().toInt();
-      prefs.begin("portail", false);
-      prefs.putInt("delai", relaisDelay);
-      prefs.end();
-    }
-    request->redirect("/settings");
+  server.on("/historique", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/historique.html", "text/html");
   });
 
-  server.on("/set-notifications", HTTP_POST, [](AsyncWebServerRequest *request) {
-    notifOuverture = request->hasParam("notif_ouverture", true);
-    notifRappel = request->hasParam("notif_rappel", true);
-    if (request->hasParam("delai_rappel", true)) {
-      delaiRappelMinutes = request->getParam("delai_rappel", true)->value().toInt();
-    }
-    prefs.begin("portail", false);
-    prefs.putBool("notif_ouverture", notifOuverture);
-    prefs.putBool("notif_rappel", notifRappel);
-    prefs.putInt("rappel_minutes", delaiRappelMinutes);
-    prefs.end();
-    request->redirect("/settings");
+  server.on("/admin", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/admin.html", "text/html");
   });
 
-    server.on("/pieton", HTTP_GET, [](AsyncWebServerRequest *request) {
-    digitalWrite(RELAY_PIETON, RELAIS_ACTIVE);
-    delay(relaisDelay);
-    digitalWrite(RELAY_PIETON, RELAIS_REPOS);
+  server.on("/users", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/users.html", "text/html");
+  });
+
+  server.on("/wifi_config", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/wifi_config.html", "text/html");
+  });
+
+  server.on("/upload", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/upload.html", "text/html");
+  });
+
+  server.on("/upload.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/upload.html", "text/html");
+  });
+
+  server.on("/enrol", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/enrol.html", "text/html");
+  });
+
+  server.on("/enrol.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/enrol.html", "text/html");
+  });
+}
+
+// -------------------------
+// Routes actions portail
+// -------------------------
+void declarerRoutesActions() {
+  server.on("/pieton", HTTP_GET, [](AsyncWebServerRequest *request) {
+    logEtatPortail("commande_pieton");
+    activerRelais(RELAY_PIETON);
     request->send(200, "text/plain", "Piéton activé !");
   });
 
   server.on("/voiture", HTTP_GET, [](AsyncWebServerRequest *request) {
-    digitalWrite(RELAY_VOITURE, RELAIS_ACTIVE);
-    delay(relaisDelay);
-    digitalWrite(RELAY_VOITURE, RELAIS_REPOS);
+    logEtatPortail("commande_voiture");
+    activerRelais(RELAY_VOITURE);
     request->send(200, "text/plain", "Voiture activée !");
   });
 
@@ -134,15 +244,283 @@ void setup() {
     bool ferme = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
     request->send(200, "text/plain", ferme ? "ferme" : "ouvert");
   });
-
-
-  server.begin();
 }
 
+// -------------------------
+// Routes paramètres
+// -------------------------
+void declarerRoutesParametres() {
+  server.on("/set-delay", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (request->hasParam("delai", true)) {
+      relaisDelay = request->getParam("delai", true)->value().toInt();
+
+      prefs.begin("portail", false);
+      prefs.putInt("delai", relaisDelay);
+      prefs.end();
+
+      logEtatPortail("parametre_delai_relais_modifie");
+    }
+
+    request->redirect("/settings");
+  });
+
+  server.on("/set-notifications", HTTP_POST, [](AsyncWebServerRequest *request) {
+    notifOuverture = request->hasParam("notif_ouverture", true);
+    notifRappel = request->hasParam("notif_rappel", true);
+
+    if (request->hasParam("delai_rappel", true)) {
+      delaiRappelMinutes = request->getParam("delai_rappel", true)->value().toInt();
+    }
+
+    prefs.begin("portail", false);
+    prefs.putBool("notif_ouverture", notifOuverture);
+    prefs.putBool("notif_rappel", notifRappel);
+    prefs.putInt("rappel_minutes", delaiRappelMinutes);
+    prefs.end();
+
+    logEtatPortail("parametres_notifications_modifies");
+
+    request->redirect("/settings");
+  });
+}
+
+// -------------------------
+// Routes logs
+// -------------------------
+void declarerRoutesLogs() {
+  server.on("/log.txt", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!SPIFFS.exists("/log.txt")) {
+      request->send(404, "text/plain", "Aucun historique trouvé.");
+      return;
+    }
+
+    File log = SPIFFS.open("/log.txt", "r");
+
+    if (!log || log.isDirectory()) {
+      request->send(500, "text/plain", "Erreur à l'ouverture du fichier.");
+      return;
+    }
+
+    AsyncWebServerResponse *response = request->beginResponse(log, "text/plain", false);
+    response->addHeader("Content-Disposition", "inline; filename=log.txt");
+    request->send(response);
+  });
+
+  server.on("/clear-log", HTTP_GET, [](AsyncWebServerRequest *request) {
+    SPIFFS.remove("/log.txt");
+
+    File log = SPIFFS.open("/log.txt", FILE_WRITE);
+
+    if (log) {
+      log.println("Horodatage;État");
+      log.close();
+    }
+
+    logEtatPortail("historique_efface");
+
+    request->send(200, "text/plain", "Historique effacé !");
+  });
+}
+
+// -------------------------
+// Routes utilisateurs
+// -------------------------
+void declarerRoutesUtilisateurs() {
+  server.on("/get-users", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!SPIFFS.exists("/users.json")) {
+      request->send(200, "application/json", "{}");
+      return;
+    }
+
+    request->send(SPIFFS, "/users.json", "application/json");
+  });
+
+  server.on("/users.json", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!SPIFFS.exists("/users.json")) {
+      request->send(404, "application/json", "{}");
+      return;
+    }
+
+    request->send(SPIFFS, "/users.json", "application/json");
+  });
+
+  server.on("/delete-user", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!request->hasParam("name")) {
+      request->send(400, "text/plain", "Paramètre name manquant");
+      return;
+    }
+
+    String userToDelete = request->getParam("name")->value();
+
+    if (!SPIFFS.exists("/users.json")) {
+      request->redirect("/users");
+      return;
+    }
+
+    File file = SPIFFS.open("/users.json", "r");
+
+    if (!file) {
+      request->send(500, "text/plain", "Impossible d'ouvrir users.json");
+      return;
+    }
+
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, file);
+    file.close();
+
+    if (error) {
+      request->send(500, "text/plain", "Erreur JSON users.json");
+      return;
+    }
+
+    if (!doc[userToDelete].isNull()) {
+      doc.remove(userToDelete);
+      logEtatPortail("utilisateur_supprime");
+    }
+
+    file = SPIFFS.open("/users.json", "w");
+
+    if (!file) {
+      request->send(500, "text/plain", "Impossible d'écrire users.json");
+      return;
+    }
+
+    serializeJsonPretty(doc, file);
+    file.close();
+
+    request->redirect("/users");
+  });
+
+  server.on("/download-users", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!SPIFFS.exists("/users.json")) {
+      request->send(404, "text/plain", "users.json introuvable");
+      return;
+    }
+
+    AsyncWebServerResponse *response =
+      request->beginResponse(SPIFFS, "/users.json", "application/json", true);
+
+    response->addHeader("Content-Disposition", "attachment; filename=users.json");
+    request->send(response);
+  });
+}
+
+// -------------------------
+// Fallback fichiers SPIFFS
+// -------------------------
+void declarerRouteFallback() {
+  server.onNotFound([](AsyncWebServerRequest *request) {
+    String path = request->url();
+
+    if (SPIFFS.exists(path)) {
+      String contentType = "text/plain";
+
+      if (path.endsWith(".html")) contentType = "text/html";
+      else if (path.endsWith(".css")) contentType = "text/css";
+      else if (path.endsWith(".js")) contentType = "application/javascript";
+      else if (path.endsWith(".json")) contentType = "application/json";
+      else if (path.endsWith(".webmanifest")) contentType = "application/manifest+json";
+      else if (path.endsWith(".png")) contentType = "image/png";
+
+      request->send(SPIFFS, path, contentType);
+      return;
+    }
+
+    request->send(404, "text/plain", "Page introuvable");
+  });
+}
+
+// -------------------------
+// SETUP
+// -------------------------
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  Serial.println("\n=== Portail ESP32 - Démarrage ===");
+
+  esp_task_wdt_init(WATCHDOG_TIMEOUT, true);
+  esp_task_wdt_add(NULL);
+
+  if (!SPIFFS.begin(true)) {
+    Serial.println("❌ Erreur SPIFFS");
+    return;
+  }
+
+  initialiserLog();
+
+  prefs.begin("portail", false);
+  relaisDelay = prefs.getInt("delai", 500);
+  enrolPassword = prefs.getString("enrol_pwd", PORTAL_DEFAULT_ENROL_PASSWORD);
+  notifOuverture = prefs.getBool("notif_ouverture", false);
+  notifRappel = prefs.getBool("notif_rappel", false);
+  delaiRappelMinutes = prefs.getInt("rappel_minutes", 10);
+  prefs.end();
+
+  pinMode(RELAY_PIETON, OUTPUT);
+  pinMode(RELAY_VOITURE, OUTPUT);
+  pinMode(PIN_CAPTEUR_FERME, INPUT);
+
+  digitalWrite(RELAY_PIETON, RELAIS_REPOS);
+  digitalWrite(RELAY_VOITURE, RELAIS_REPOS);
+
+  setupWiFi();
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
+
+  configTime(3600, 0, "pool.ntp.org", "time.nist.gov");
+
+  if (MDNS.begin("portail")) {
+    Serial.println("✅ mDNS actif : http://portail.local");
+  } else {
+    Serial.println("❌ Erreur mDNS");
+  }
+
+  ArduinoOTA.setHostname("portail-esp32");
+  ArduinoOTA.setPassword(PORTAL_OTA_PASSWORD);
+  ArduinoOTA.begin();
+
+  declarerRoutesPages();
+  declarerRoutesActions();
+  declarerRoutesParametres();
+  declarerRoutesLogs();
+  declarerRoutesUtilisateurs();
+  declarerRouteFallback();
+
+  server.begin();
+
+  logEtatPortail("demarrage_esp32");
+
+  bool etatInitial = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
+  logEtatPortail(etatInitial ? "etat_initial_ferme" : "etat_initial_ouvert");
+
+  Serial.println("✅ Serveur web démarré !");
+}
+
+// -------------------------
+// LOOP
+// -------------------------
 void loop() {
+  esp_task_wdt_reset();
   ArduinoOTA.handle();
 
-  static bool etatPrec = false;
+  gererRelais();
+
+  if (millis() - lastWifiCheck >= WIFI_CHECK_INTERVAL) {
+    lastWifiCheck = millis();
+    reconnectWiFiIfNeeded();
+  }
+
+  if (millis() - lastKeepAlive >= KEEPALIVE_INTERVAL) {
+    lastKeepAlive = millis();
+    keepAliveLog();
+  }
+
+  redemarrageQuotidien();
+
+  static bool etatPrec = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
   bool etatActuel = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
 
   static unsigned long tempsOuverture = 0;
@@ -150,20 +528,29 @@ void loop() {
 
   if (etatActuel != etatPrec) {
     String etatStr = etatActuel ? "ferme" : "ouvert";
+
     logEtatPortail(etatStr);
-    if (notifOuverture) notifierPortailOuvert();
+
+    if (notifOuverture) {
+      notifierPortailOuvert();
+    }
+
     etatPrec = etatActuel;
+
     if (!etatActuel) {
       tempsOuverture = millis();
       alerteEnvoyee = false;
     }
   }
 
-  if (!etatActuel && notifRappel && !alerteEnvoyee &&
+  if (!etatActuel &&
+      notifRappel &&
+      !alerteEnvoyee &&
       millis() - tempsOuverture > (unsigned long)(delaiRappelMinutes * 60000)) {
+    logEtatPortail("alerte_portail_ouvert_trop_longtemps");
     notifierPortailOuvert();
     alerteEnvoyee = true;
   }
 
-  delay(500);
+  delay(10);
 }

@@ -1,126 +1,60 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Portail Connecté</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f0f0f0;
-      color: #333;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      margin: 0;
-      padding: 20px;
-    }
-
-    h1 {
-      margin-bottom: 10px;
-    }
-
-    #etatPortail {
-      font-size: 22px;
-      margin-bottom: 30px;
-      padding: 10px 20px;
-      border-radius: 10px;
-      font-weight: bold;
-    }
-
-    .ferme {
-      background-color: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
-    }
-
-    .ouvert {
-      background-color: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
-    }
-
-    button {
-      padding: 20px 40px;
-      margin: 10px;
-      font-size: 24px;
-      border: none;
-      border-radius: 10px;
-      background-color: #007BFF;
-      color: white;
-      box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.3);
-      cursor: pointer;
-      transition: background-color 0.3s;
-    }
-
-    button:hover {
-      background-color: #0056b3;
-    }
-
-    a {
-      margin-top: 30px;
-      font-size: 18px;
-      color: #007BFF;
-      text-decoration: none;
-    }
-
-    a:hover {
-      text-decoration: underline;
-    }
-  </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#071a33">
+  <meta name="description" content="Application locale de commande et de surveillance du portail.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Portail">
+  <title>PortailControl</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <h1>Contrôle du Portail</h1>
+  <main class="app-shell">
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Commande locale ESP32</p>
+        <h1>PortailControl</h1>
+      </div>
+      <span id="networkBadge" class="badge badge-warn">Connexion…</span>
+    </header>
 
-  <div id="etatPortail" class="ouvert">Lecture de l'état...</div>
+    <section class="status-card" aria-live="polite" aria-atomic="true">
+      <p class="status-label">Capteur de fin de course</p>
+      <div id="gateStatus" class="gate-status status-unknown">État inconnu</div>
+      <p id="statusDetail">Lecture de l’état physique…</p>
+      <p id="lastRefresh" class="timestamp">Aucune actualisation</p>
+    </section>
 
-  <button onclick="ouvrirPieton()">🚶 Mode Piéton</button>
-  <button onclick="ouvrirVoiture()">🚗 Mode Voiture</button>
+    <section class="command-card" aria-labelledby="commandsTitle">
+      <h2 id="commandsTitle">Commandes par impulsion</h2>
+      <p class="warning">Une réponse HTTP confirme seulement la réception par l’ESP32, pas le mouvement du portail.</p>
+      <button id="pedestrianButton" class="action action-pedestrian" type="button">
+        <span>Impulsion piétonne</span><small>Actionne le relais piéton</small>
+      </button>
+      <button id="vehicleButton" class="action action-vehicle" type="button">
+        <span>Impulsion complète</span><small>Actionne le relais voiture</small>
+      </button>
+      <button id="refreshButton" class="action action-secondary" type="button">Actualiser l’état</button>
+      <p id="commandMessage" class="message" aria-live="assertive"></p>
+    </section>
 
-  <a href="/settings">⚙️ Paramètres</a>
-  
+    <nav class="links" aria-label="Administration">
+      <a href="/historique">Historique</a>
+      <a href="/settings">Paramètres</a>
+      <a href="/wifi_config">Wi-Fi</a>
+      <a href="/users">Utilisateurs</a>
+    </nav>
 
-  <script>
-    function ouvrirPieton() {
-      fetch('/pieton').then(response => {
-        console.log("Commande piéton envoyée");
-      }).catch(error => {
-        alert("Erreur lors de l'envoi de la commande piéton");
-      });
-    }
-
-    function ouvrirVoiture() {
-      fetch('/voiture').then(response => {
-        console.log("Commande voiture envoyée");
-      }).catch(error => {
-        alert("Erreur lors de l'envoi de la commande voiture");
-      });
-    }
-
-    function majEtatPortail() {
-      fetch('/etat')
-        .then(response => response.text())
-        .then(etat => {
-          const zone = document.getElementById("etatPortail");
-          if (etat.trim() === "ferme") {
-            zone.textContent = "🔒 Portail fermé";
-            zone.className = "ferme";
-          } else {
-            zone.textContent = "🚪 Portail non fermé";
-            zone.className = "ouvert";
-          }
-        })
-        .catch(() => {
-          const zone = document.getElementById("etatPortail");
-          zone.textContent = "❌ Erreur de lecture";
-          zone.className = "ouvert";
-        });
-    }
-
-    majEtatPortail();
-    setInterval(majEtatPortail, 2000);
-  </script>
+    <button id="installButton" class="install" type="button" hidden>Installer PortailControl</button>
+    <p id="installHint" class="install-hint">L’installation est proposée par Chrome ou Edge lorsque les conditions PWA sont réunies.</p>
+  </main>
+  <script src="/app.js" defer></script>
 </body>
 </html>

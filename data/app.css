@@ -1,0 +1,51 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #03101f;
+  color: #f7fbff;
+  --navy: #071a33;
+  --card: #0d2948;
+  --cyan: #21d4f4;
+  --green: #36d576;
+  --orange: #ffb84d;
+  --red: #ff6577;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #123d66, #03101f 55%); }
+button, a { font: inherit; }
+button { touch-action: manipulation; }
+.app-shell { width: min(100%, 34rem); margin: 0 auto; padding: max(1rem, env(safe-area-inset-top)) 1rem max(2rem, env(safe-area-inset-bottom)); }
+.app-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem 1rem; margin-bottom: 1rem; }
+.eyebrow, .status-label { margin: 0; color: #a9bed3; font-size: .78rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+h1 { margin: .15rem 0 0; font-size: clamp(1.8rem, 8vw, 2.5rem); }
+h2 { margin: 0 0 .5rem; font-size: 1.2rem; }
+.badge { padding: .45rem .7rem; border-radius: 999px; font-size: .8rem; font-weight: 800; white-space: nowrap; }
+.badge-ok { background: rgba(54, 213, 118, .16); color: var(--green); }
+.badge-warn { background: rgba(255, 184, 77, .16); color: var(--orange); }
+.badge-error { background: rgba(255, 101, 119, .16); color: var(--red); }
+.status-card, .command-card { padding: 1.15rem; margin-bottom: 1rem; border: 1px solid rgba(255,255,255,.1); border-radius: 1.25rem; background: rgba(13, 41, 72, .95); box-shadow: 0 1rem 2.5rem rgba(0,0,0,.22); }
+.gate-status { margin: .55rem 0; font-size: clamp(1.7rem, 9vw, 2.5rem); font-weight: 900; }
+.status-closed { color: var(--green); }
+.status-open { color: var(--red); }
+.status-unknown { color: var(--orange); }
+.status-card p { margin-bottom: .4rem; }
+.timestamp { color: #a9bed3; font-size: .84rem; }
+.warning { padding: .75rem; border-left: .25rem solid var(--orange); background: rgba(255,184,77,.1); color: #ffe0ae; line-height: 1.4; }
+.action { width: 100%; min-height: 4.5rem; margin-top: .75rem; padding: .85rem 1rem; border: 0; border-radius: 1rem; color: #fff; font-weight: 850; cursor: pointer; }
+.action span, .action small { display: block; }
+.action small { margin-top: .2rem; font-size: .76rem; font-weight: 600; opacity: .8; }
+.action-pedestrian { background: #126a78; }
+.action-vehicle { background: #1251a0; }
+.action-secondary { min-height: 3.5rem; background: #334b63; }
+.action:focus-visible, a:focus-visible, .install:focus-visible { outline: .2rem solid var(--cyan); outline-offset: .15rem; }
+.action:disabled { cursor: wait; opacity: .45; }
+.message { min-height: 2.8rem; margin: .9rem 0 0; line-height: 1.4; }
+.message-success { color: var(--green); }
+.message-error { color: var(--red); }
+.links { display: grid; grid-template-columns: repeat(2, 1fr); gap: .65rem; }
+.links a { min-height: 3rem; display: grid; place-items: center; padding: .65rem; border-radius: .8rem; background: #142b42; color: #dbeeff; text-decoration: none; font-weight: 700; }
+.install { width: 100%; margin-top: 1rem; padding: .9rem; border: .1rem solid var(--cyan); border-radius: .8rem; background: transparent; color: var(--cyan); font-weight: 800; }
+.install-hint { color: #92a9bf; font-size: .78rem; line-height: 1.4; text-align: center; }
+@media (min-width: 42rem) { .app-shell { padding-top: 2rem; } }
+@media (prefers-reduced-motion: no-preference) { .action:active { transform: scale(.985); } }

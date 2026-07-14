@@ -3,46 +3,119 @@
 <head>
   <meta charset="UTF-8">
   <title>Historique du Portail</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body {
       font-family: Arial, sans-serif;
-      background: #f9f9f9;
+      background: #f8f9fa;
       padding: 20px;
+      max-width: 800px;
+      margin: auto;
     }
+
     h1 {
       text-align: center;
+      margin-bottom: 20px;
     }
-    pre {
-      background: #f0f0f0;
-      border: 1px solid #ccc;
-      padding: 10px;
-      white-space: pre-wrap;
-      overflow-x: auto;
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
     }
-    a {
-      display: inline-block;
-      margin-top: 20px;
-      text-align: center;
-      display: block;
-      text-decoration: none;
-      color: #007BFF;
+
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #ccc;
+    }
+
+    th {
+      background-color: #007BFF;
+      color: white;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      margin: 10px 5px;
+      font-size: 16px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      color: white;
+    }
+
+    .btn-refresh {
+      background-color: #28a745;
+    }
+
+    .btn-clear {
+      background-color: #dc3545;
+    }
+
+    .btn-return {
+      background-color: #6c757d;
+    }
+
+    .btn:hover {
+      opacity: 0.9;
     }
   </style>
 </head>
 <body>
-  <h1>📝 Historique du Portail</h1>
-  <pre id="log">Chargement...</pre>
-  <a href="/">⬅️ Retour à l’accueil</a>
+
+  <h1>📄 Historique du Portail</h1>
+
+  <div style="text-align: center;">
+    <button class="btn btn-refresh" onclick="chargerLog()">🔄 Rafraîchir</button>
+    <button class="btn btn-clear" onclick="effacerLog()">🗑️ Effacer</button>
+    <a href="/settings"><button class="btn btn-return">⚙️ Paramètres</button></a>
+  </div>
+
+  <table id="logTable">
+    <thead>
+      <tr><th>Horodatage</th><th>État</th></tr>
+    </thead>
+    <tbody id="logBody">
+      <tr><td colspan="2">Chargement...</td></tr>
+    </tbody>
+  </table>
 
   <script>
-    fetch('/log.txt')
-      .then(response => response.text())
-      .then(data => {
-        document.getElementById('log').innerText = data;
-      })
-      .catch(() => {
-        document.getElementById('log').innerText = "Erreur lors du chargement du journal.";
-      });
+    function chargerLog() {
+      fetch('/log.txt')
+        .then(response => {
+          if (!response.ok) throw new Error("Erreur lors du chargement");
+          return response.text();
+        })
+        .then(data => {
+          const lignes = data.trim().split("\\n").slice(1); // sauter l'entête
+          const corps = document.getElementById("logBody");
+          corps.innerHTML = '';
+          lignes.reverse().forEach(ligne => {
+            const [horodatage, etat] = ligne.split(";");
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td>${horodatage}</td><td>${etat}</td>`;
+            corps.appendChild(tr);
+          });
+          if (lignes.length === 0) {
+            document.getElementById("logBody").innerHTML = "<tr><td colspan='2'>Aucun événement enregistré.</td></tr>";
+          }
+        })
+        .catch(err => {
+          document.getElementById("logBody").innerHTML = "<tr><td colspan='2'>Erreur de lecture du journal.</td></tr>";
+        });
+    }
+
+    function effacerLog() {
+      if (!confirm("Voulez-vous vraiment effacer l’historique ?")) return;
+      fetch('/clear-log')
+        .then(() => chargerLog());
+    }
+
+    // Chargement initial
+    chargerLog();
   </script>
+
 </body>
 </html>

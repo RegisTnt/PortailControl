@@ -5,3 +5,6 @@
 .vscode/ipch
 lib/
 secrets.h
+include/config.h
+platformio.local.ini
+*.code-workspace
