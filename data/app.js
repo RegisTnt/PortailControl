@@ -14,23 +14,20 @@ const elements = {
   detail: document.querySelector('#statusDetail'),
   refreshed: document.querySelector('#lastRefresh'),
   message: document.querySelector('#commandMessage'),
+  openActions: document.querySelector('#openActions'),
   pedestrian: document.querySelector('#pedestrianButton'),
   vehicle: document.querySelector('#vehicleButton'),
+  close: document.querySelector('#closeButton'),
   refresh: document.querySelector('#refreshButton'),
   historyRefresh: document.querySelector('#historyRefresh'),
   historyState: document.querySelector('#historyState'),
   historyList: document.querySelector('#historyList'),
-  dialog: document.querySelector('#confirmDialog'),
-  dialogTitle: document.querySelector('#dialogTitle'),
-  dialogText: document.querySelector('#dialogText'),
-  dialogConfirm: document.querySelector('#dialogConfirm'),
   install: document.querySelector('#installButton'),
   installHint: document.querySelector('#installHint')
 };
 
 let commandLocked = false;
 let portalReachable = false;
-let pendingCommand = null;
 let installPrompt = null;
 let weatherAgeAtFetch = null;
 let weatherReceivedAt = 0;
@@ -126,6 +123,8 @@ function setGateState(kind, title, detail) {
   elements.detail.textContent = detail;
   const icon = kind === 'closed' ? '#i-lock' : kind === 'open' ? '#i-home' : '#i-alert';
   elements.statusCard.querySelector('use').setAttribute('href', icon);
+  elements.openActions.hidden = kind !== 'closed';
+  elements.close.hidden = kind !== 'open';
 }
 
 async function refreshState() {
@@ -165,44 +164,50 @@ function lockCommands(locked) {
   commandLocked = locked;
   elements.pedestrian.disabled = locked || !portalReachable;
   elements.vehicle.disabled = locked || !portalReachable;
+  elements.close.disabled = locked || !portalReachable;
 }
 
 function resetCommandStyles() {
-  [elements.pedestrian, elements.vehicle].forEach(button => button.classList.remove('is-sending', 'is-success', 'is-error'));
+  [elements.pedestrian, elements.vehicle, elements.close].forEach(button => {
+    button.classList.remove('is-sending', 'is-success', 'is-error');
+    const copy = button.querySelector('.command-copy');
+    if (copy.dataset.originalHtml) copy.innerHTML = copy.dataset.originalHtml;
+  });
 }
 
-function requestCommand(path, label, button) {
-  if (commandLocked || !portalReachable) {
+function setCommandLabel(button, label) {
+  const copy = button.querySelector('.command-copy');
+  if (!copy.dataset.originalHtml) copy.dataset.originalHtml = copy.innerHTML;
+  copy.textContent = label;
+}
+
+async function sendCommand(path, button) {
+  if (commandLocked) return;
+  if (!portalReachable) {
     showMessage('Actualisez l’état et vérifiez que l’ESP32 est accessible.', 'error');
     return;
   }
-  pendingCommand = { path, label, button };
-  elements.dialogTitle.textContent = `Envoyer ${label} ?`;
-  elements.dialogText.textContent = 'La réponse HTTP confirmera la réception par l’ESP32. La position sera ensuite vérifiée par le capteur.';
-  elements.dialog.showModal();
-}
-
-async function sendPendingCommand() {
-  if (!pendingCommand || commandLocked) return;
-  const command = pendingCommand;
-  pendingCommand = null;
   resetCommandStyles();
-  command.button.classList.add('is-sending');
+  button.classList.add('is-sending');
+  setCommandLabel(button, 'Envoi de l’impulsion…');
   lockCommands(true);
-  showMessage('Transmission en cours…');
+  showMessage('Envoi de l’impulsion…');
   try {
-    const response = await directFetch(command.path);
-    const body = await response.text();
-    if (!response.ok) throw new Error(`Commande refusée (HTTP ${response.status}) : ${body}`);
-    command.button.classList.remove('is-sending');
-    command.button.classList.add('is-success');
-    showMessage('Impulsion transmise. Le mouvement n’est pas confirmé.', 'success');
-    setTimeout(refreshState, STATE_REFRESH_DELAY_MS);
+    const response = await directFetch(path);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    await response.text();
+    button.classList.remove('is-sending');
+    button.classList.add('is-success');
+    setCommandLabel(button, 'Impulsion transmise');
+    showMessage('Impulsion transmise', 'success');
   } catch (error) {
-    command.button.classList.remove('is-sending');
-    command.button.classList.add('is-error');
-    showMessage(`${error.message || 'Aucune réponse de l’ESP32.'} Aucun nouvel essai automatique.`, 'error');
+    button.classList.remove('is-sending');
+    button.classList.add('is-error');
+    setCommandLabel(button, 'Commande non transmise');
+    showMessage('Commande non transmise', 'error');
   } finally {
+    // Une seule relecture d'état est planifiée ; la commande physique n'est jamais rejouée.
+    setTimeout(refreshState, STATE_REFRESH_DELAY_MS);
     setTimeout(() => {
       resetCommandStyles();
       lockCommands(false);
@@ -311,11 +316,11 @@ function showView(name, updateHash = true) {
   document.querySelector(`[data-view="${target}"] h2`)?.focus?.({ preventScroll: true });
 }
 
-elements.pedestrian.addEventListener('click', () => requestCommand('/pieton', 'une impulsion piétonne', elements.pedestrian));
-elements.vehicle.addEventListener('click', () => requestCommand('/voiture', 'une impulsion complète', elements.vehicle));
-elements.dialog.addEventListener('close', () => {
-  if (elements.dialog.returnValue === 'confirm') sendPendingCommand(); else pendingCommand = null;
-});
+elements.pedestrian.addEventListener('click', () => sendCommand('/pieton', elements.pedestrian));
+elements.vehicle.addEventListener('click', () => sendCommand('/voiture', elements.vehicle));
+// Libellé contextuel uniquement : cette action reste une impulsion complète /voiture.
+// Le sens dépend de l'automatisme et HTTP 200 ne prouve jamais la fermeture physique.
+elements.close.addEventListener('click', () => sendCommand('/voiture', elements.close));
 elements.refresh.addEventListener('click', refreshAll);
 elements.historyRefresh.addEventListener('click', loadHistory);
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => showView(item.dataset.target)));

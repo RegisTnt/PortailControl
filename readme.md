@@ -20,15 +20,15 @@ L'interface principale est une Progressive Web App sans CDN ni dépendance Inter
 
 - météo actuelle de Toulon via Open-Meteo : température réelle, température ressentie, code météo et âge de la mesure ;
 - état du capteur et heure de dernière actualisation ;
-- gros boutons tactiles pour l'impulsion piétonne et l'impulsion complète ;
-- confirmation explicite, timeout de 5 s et anti-double-appui de 3 s ;
+- commandes tactiles contextuelles : deux ouvertures si le capteur confirme la fermeture, sinon une impulsion complète libellée **Fermer le portail** ;
+- envoi direct au toucher, timeout de 5 s et anti-double-appui de 3 s ;
 - aucun retry ni stockage différé d'une commande ;
 - distinction entre réception HTTP et état physique confirmé ;
 - manifeste, service worker et icônes 192/512 px.
 
 La nouvelle interface adopte un thème « vacances d'été méditerranéennes » entièrement réalisé en CSS et SVG inline : bleu profond, azur, turquoise, jaune solaire, sable clair et cartes blanches. Une page unique regroupe trois vues accessibles par une navigation inférieure fixe :
 
-- **Accueil** compact : connexion, météo, capteur, deux commandes et rappel de sécurité ;
+- **Accueil** compact : connexion, météo, capteur, commandes adaptées à l'état et rappel de sécurité ;
 - **Historique** : lecture réseau de `log.txt`, regroupement par date et cartes d'événements ;
 - **Réglages** : accès aux pages Paramètres, Wi-Fi, Utilisateurs et Administration.
 

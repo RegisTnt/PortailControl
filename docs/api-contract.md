@@ -62,12 +62,12 @@ Les fichiers web contiennent encore des appels ou formulaires vers `POST /enrol`
 - Ne jamais faire de retry automatique sur `/pieton` ou `/voiture` et ne jamais les mettre en file hors ligne.
 - Utiliser un timeout borné ; 5 s est la valeur de la PWA.
 - Vérifier la connexion Wi-Fi et l'accessibilité de l'adresse locale avant d'activer les commandes.
-- Demander une confirmation utilisateur immédiatement avant chaque commande physique.
+- Considérer chaque appui volontaire sur un bouton actif comme l'intention d'envoyer exactement une impulsion ; la PWA ne présente pas de modale intermédiaire.
 - Appliquer un anti-double-clic ; la PWA utilise 3 s, sans prétendre que ce délai couvre le cycle mécanique.
 - Relire `/etat` après une commande, tout en sachant que ce capteur confirme uniquement la fermeture.
 - Distinguer une absence de réponse (résultat inconnu) d'un refus HTTP explicite.
 - Distinguer trois niveaux : demande reçue par le handler, relais possiblement actionné, état physique confirmé par le capteur.
-- Ne jamais présenter `/voiture` comme une commande garantie « ouvrir » ou « fermer ».
+- Un libellé contextuel « Fermer le portail » peut être affiché lorsque le capteur ne confirme pas la fermeture, mais `/voiture` reste une impulsion non directionnelle et ne garantit jamais la fermeture.
 - Garder l'API sur le réseau local. HTTP sur Internet, redirection de port et exposition des routes sans authentification sont interdits sans architecture de sécurité dédiée.
 
 ## Services non HTTP et reprise après erreur

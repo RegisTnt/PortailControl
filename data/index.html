@@ -13,7 +13,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" sizes="192x192" href="/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
-  <link rel="stylesheet" href="/app.css?v=6">
+  <link rel="stylesheet" href="/app.css?v=9">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -53,14 +53,17 @@
           <div><strong id="gateStatus">ÉTAT INCONNU</strong><p id="statusDetail">Lecture du capteur…</p><small id="lastRefresh">Aucune actualisation</small></div>
         </article>
 
-        <div class="primary-actions" aria-label="Commandes du portail">
+        <div id="openActions" class="primary-actions" aria-label="Commandes d’ouverture" hidden>
           <button id="pedestrianButton" class="command command-pedestrian" type="button" disabled>
-            <svg><use href="#i-walk"/></svg><span><small>OUVERTURE</small>PIÉTONNE</span><i aria-hidden="true">☀</i>
+            <svg><use href="#i-walk"/></svg><span class="command-copy"><small>OUVERTURE</small>PIÉTONNE</span><i aria-hidden="true">☀</i>
           </button>
           <button id="vehicleButton" class="command command-vehicle" type="button" disabled>
-            <svg><use href="#i-car"/></svg><span><small>OUVERTURE</small>COMPLÈTE</span><i aria-hidden="true">≈</i>
+            <svg><use href="#i-car"/></svg><span class="command-copy"><small>OUVERTURE</small>COMPLÈTE</span><i aria-hidden="true">≈</i>
           </button>
         </div>
+        <button id="closeButton" class="command command-close" type="button" disabled hidden>
+          <svg><use href="#i-lock"/></svg><span class="command-copy"><small>IMPULSION COMPLÈTE</small>FERMER LE PORTAIL</span><i aria-hidden="true">≈</i>
+        </button>
         <p class="safety-note"><span aria-hidden="true">★</span> La réponse confirme l’impulsion, pas le mouvement.</p>
         <p id="commandMessage" class="message" aria-live="assertive"></p>
         <button id="installButton" class="install" type="button" hidden>Installer l’application</button>
@@ -91,14 +94,6 @@
     </nav>
   </div>
 
-  <dialog id="confirmDialog" class="confirm-dialog" aria-labelledby="dialogTitle" aria-describedby="dialogText">
-    <form method="dialog">
-      <span class="dialog-icon"><svg><use href="#i-alert"/></svg></span>
-      <h2 id="dialogTitle">Confirmer la commande</h2>
-      <p id="dialogText">La réponse HTTP confirmera uniquement la réception par l’ESP32.</p>
-      <div class="dialog-actions"><button value="cancel" class="dialog-cancel">Annuler</button><button id="dialogConfirm" value="confirm" class="dialog-confirm">Confirmer</button></div>
-    </form>
-  </dialog>
-  <script src="/app.js?v=6" defer></script>
+  <script src="/app.js?v=9" defer></script>
 </body>
 </html>
