@@ -28,7 +28,7 @@ L'interface principale est une Progressive Web App sans CDN ni dépendance Inter
 
 Le service worker met uniquement en cache la coquille statique (`index.html`, CSS, JavaScript, manifeste et icônes). Les routes d'état, de météo, de commande, d'historique, de journal et d'administration restent réseau uniquement. Hors ligne, l'interface peut s'afficher, mais une commande échoue immédiatement et n'est jamais rejouée plus tard.
 
-La météo est récupérée sans clé API dans une tâche réseau séparée après la connexion Wi-Fi, puis toutes les 15 minutes. L'appel HTTPS utilise un timeout de 4 s et ne bloque jamais la boucle de commande du portail. La dernière valeur valide reste disponible en RAM si Internet ou Open-Meteo deviennent indisponibles. Après un redémarrage, l'interface affiche **Météo indisponible** jusqu'au premier succès.
+La météo est récupérée sans clé API dans une tâche réseau séparée après la connexion Wi-Fi, puis toutes les 15 minutes. Tant qu'aucune valeur valide n'existe, une nouvelle tentative est faite après 1 minute. L'appel HTTP utilise un timeout de 4 s et ne bloque jamais la boucle de commande du portail. La dernière valeur valide reste disponible en RAM si Internet ou Open-Meteo deviennent indisponibles. Après un redémarrage, l'interface affiche **Météo indisponible** jusqu'au premier succès.
 
 > L'installation PWA exige normalement un contexte sécurisé. Les navigateurs acceptent `localhost`, mais une adresse HTTP privée servie directement par l'ESP32 peut ne pas proposer l'installation selon le navigateur et sa version. Le manifeste et le service worker restent utilisables dès que le contexte est accepté.
 
