@@ -61,6 +61,7 @@ Les fichiers web contiennent encore des appels ou formulaires vers `POST /enrol`
 - Ne jamais rejouer automatiquement une commande physique, même après timeout ou perte de réponse.
 - Ne jamais faire de retry automatique sur `/pieton` ou `/voiture` et ne jamais les mettre en file hors ligne.
 - Utiliser un timeout borné ; 5 s est la valeur de la PWA.
+- Pour `/etat`, la PWA utilise un timeout de 1,8 s et un polling non chevauchant : 2 s au premier plan, 15 s en arrière-plan. Deux échecs consécutifs rendent les commandes indisponibles ; une réponse valide rétablit automatiquement l'état connecté.
 - Vérifier la connexion Wi-Fi et l'accessibilité de l'adresse locale avant d'activer les commandes.
 - Considérer chaque appui volontaire sur un bouton actif comme l'intention d'envoyer exactement une impulsion ; la PWA ne présente pas de modale intermédiaire.
 - Appliquer un anti-double-clic ; la PWA utilise 3 s, sans prétendre que ce délai couvre le cycle mécanique.

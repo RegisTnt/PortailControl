@@ -63,6 +63,10 @@ main { position: relative; }
 .status-card p, .status-card small { margin: .28rem 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-card p { font-size: clamp(.72rem, 3vw, .86rem); color: #536572; }
 .status-card small { display: block; color: #7a898f; font-size: .66rem; }
+.status-card .refresh-meta { display: flex; align-items: center; gap: .35rem; }
+.refresh-dot { width: .46rem; height: .46rem; flex: 0 0 .46rem; border-radius: 50%; background: #dc9328; transition: background-color .18s ease; }
+.refresh-dot.refresh-fresh { background: var(--green); }
+.refresh-dot.refresh-stale { background: #dc9328; }
 .status-card.status-closed .status-icon { background: var(--green); }
 .status-card.status-closed strong { color: #35a548; }
 .status-card.status-open .status-icon { background: var(--azure); }

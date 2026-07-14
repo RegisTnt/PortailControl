@@ -1,11 +1,11 @@
 'use strict';
 
-const CACHE_NAME = 'portailcontrol-static-v9';
+const CACHE_NAME = 'portailcontrol-static-v10';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/app.css?v=9',
-  '/app.js?v=9',
+  '/app.css?v=10',
+  '/app.js?v=10',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png'

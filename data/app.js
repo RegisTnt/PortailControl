@@ -2,7 +2,10 @@
 
 const COMMAND_LOCK_MS = 3000;
 const REQUEST_TIMEOUT_MS = 5000;
-const STATE_REFRESH_DELAY_MS = 1200;
+const STATE_REQUEST_TIMEOUT_MS = 1800;
+const STATE_POLL_VISIBLE_MS = 2000;
+const STATE_POLL_HIDDEN_MS = 15000;
+const STATE_FAILURE_THRESHOLD = 2;
 
 const elements = {
   network: document.querySelector('#networkBadge'),
@@ -12,7 +15,8 @@ const elements = {
   statusCard: document.querySelector('#statusCard'),
   status: document.querySelector('#gateStatus'),
   detail: document.querySelector('#statusDetail'),
-  refreshed: document.querySelector('#lastRefresh'),
+  refreshed: document.querySelector('#lastRefreshText'),
+  refreshDot: document.querySelector('#refreshDot'),
   message: document.querySelector('#commandMessage'),
   openActions: document.querySelector('#openActions'),
   pedestrian: document.querySelector('#pedestrianButton'),
@@ -33,6 +37,13 @@ let weatherAgeAtFetch = null;
 let weatherReceivedAt = 0;
 let hasWeatherValue = false;
 let historyLoaded = false;
+let stateRequestInProgress = false;
+let statePollTimer = null;
+let lastGateState = null;
+let lastNetworkStatus = null;
+let lastNetworkLabel = '';
+let lastStateUpdateAt = 0;
+let consecutiveStateFailures = 0;
 
 async function directFetch(path) {
   if (!navigator.onLine) throw new Error('Le navigateur est hors ligne. Aucune commande n’est envoyée.');
@@ -51,6 +62,9 @@ async function directFetch(path) {
 }
 
 function setNetwork(kind, label) {
+  if (lastNetworkStatus === kind && lastNetworkLabel === label) return;
+  lastNetworkStatus = kind;
+  lastNetworkLabel = label;
   elements.network.className = `network network-${kind}`;
   elements.network.lastChild.textContent = label;
 }
@@ -118,6 +132,8 @@ async function refreshWeather() {
 }
 
 function setGateState(kind, title, detail) {
+  if (lastGateState === kind) return;
+  lastGateState = kind;
   elements.statusCard.className = `status-card status-${kind}`;
   elements.status.textContent = title;
   elements.detail.textContent = detail;
@@ -127,10 +143,18 @@ function setGateState(kind, title, detail) {
   elements.close.hidden = kind !== 'open';
 }
 
+function updateRefreshIndicator(fresh) {
+  elements.refreshDot.className = `refresh-dot ${fresh ? 'refresh-fresh' : 'refresh-stale'}`;
+  elements.refreshDot.title = fresh ? 'État actualisé récemment' : 'État ancien ou indisponible';
+}
+
 async function refreshState() {
-  elements.refresh.disabled = true;
+  if (stateRequestInProgress) return false;
+  stateRequestInProgress = true;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), STATE_REQUEST_TIMEOUT_MS);
   try {
-    const response = await directFetch('/etat');
+    const response = await fetch('/etat', { method: 'GET', cache: 'no-store', signal: controller.signal });
     if (!response.ok) throw new Error(`Lecture refusée par l’ESP32 (HTTP ${response.status}).`);
     const value = (await response.text()).trim().toLowerCase();
     if (value === 'ferme') {
@@ -140,24 +164,62 @@ async function refreshState() {
     } else {
       throw new Error(`Réponse d’état inconnue : ${value || 'vide'}.`);
     }
-    elements.refreshed.textContent = `Actualisé à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+    consecutiveStateFailures = 0;
+    lastStateUpdateAt = Date.now();
+    elements.refreshed.textContent = `Actualisé à ${new Date(lastStateUpdateAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`;
+    updateRefreshIndicator(true);
     setNetwork('ok', 'ESP32 connecté');
     portalReachable = true;
+    return true;
   } catch (error) {
-    setGateState('error', 'ÉTAT INCONNU', error.message || 'Capteur indisponible');
-    elements.refreshed.textContent = 'Aucune actualisation récente';
-    setNetwork('error', navigator.onLine ? 'ESP32 inaccessible' : 'Hors ligne');
-    portalReachable = false;
+    consecutiveStateFailures += 1;
+    updateRefreshIndicator(false);
+    if (consecutiveStateFailures >= STATE_FAILURE_THRESHOLD) {
+      setGateState('error', 'ÉTAT INCONNU', 'ESP32 inaccessible');
+      elements.refreshed.textContent = lastStateUpdateAt
+        ? `Dernière réponse à ${new Date(lastStateUpdateAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+        : 'Aucune actualisation récente';
+      setNetwork('error', navigator.onLine ? 'ESP32 inaccessible' : 'Hors ligne');
+      portalReachable = false;
+    }
+    return false;
   } finally {
-    elements.refresh.disabled = false;
+    clearTimeout(timer);
+    stateRequestInProgress = false;
     lockCommands(commandLocked);
+  }
+}
+
+function currentStatePollInterval() {
+  return document.visibilityState === 'visible' ? STATE_POLL_VISIBLE_MS : STATE_POLL_HIDDEN_MS;
+}
+
+function scheduleStatePoll(delay = currentStatePollInterval()) {
+  clearTimeout(statePollTimer);
+  statePollTimer = setTimeout(async () => {
+    await refreshState();
+    scheduleStatePoll();
+  }, delay);
+}
+
+function restartStatePolling(immediate = false) {
+  clearTimeout(statePollTimer);
+  if (immediate) {
+    refreshState().finally(() => scheduleStatePoll());
+  } else {
+    scheduleStatePoll();
   }
 }
 
 async function refreshAll() {
   elements.refresh.classList.add('is-loading');
-  await Promise.allSettled([refreshState(), refreshWeather()]);
-  elements.refresh.classList.remove('is-loading');
+  elements.refresh.disabled = true;
+  try {
+    await Promise.allSettled([refreshState(), refreshWeather()]);
+  } finally {
+    elements.refresh.disabled = false;
+    elements.refresh.classList.remove('is-loading');
+  }
 }
 
 function lockCommands(locked) {
@@ -206,8 +268,8 @@ async function sendCommand(path, button) {
     setCommandLabel(button, 'Commande non transmise');
     showMessage('Commande non transmise', 'error');
   } finally {
-    // Une seule relecture d'état est planifiée ; la commande physique n'est jamais rejouée.
-    setTimeout(refreshState, STATE_REFRESH_DELAY_MS);
+    // Relecture immédiate du capteur ; la commande physique n'est jamais rejouée.
+    await refreshState();
     setTimeout(() => {
       resetCommandStyles();
       lockCommands(false);
@@ -325,11 +387,25 @@ elements.refresh.addEventListener('click', refreshAll);
 elements.historyRefresh.addEventListener('click', loadHistory);
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => showView(item.dataset.target)));
 window.addEventListener('hashchange', () => showView(location.hash.slice(1), false));
-window.addEventListener('online', refreshAll);
+window.addEventListener('online', () => {
+  refreshWeather();
+  restartStatePolling(true);
+});
 window.addEventListener('offline', () => {
+  consecutiveStateFailures = STATE_FAILURE_THRESHOLD;
+  setGateState('error', 'ÉTAT INCONNU', 'ESP32 inaccessible');
   setNetwork('error', 'Hors ligne');
   portalReachable = false;
+  updateRefreshIndicator(false);
   lockCommands(false);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    restartStatePolling(true);
+  } else {
+    updateRefreshIndicator(false);
+    restartStatePolling(false);
+  }
 });
 
 window.addEventListener('beforeinstallprompt', event => {
@@ -356,7 +432,7 @@ if ('serviceWorker' in navigator) {
 }
 
 showView(location.hash.slice(1), false);
-refreshAll();
-setInterval(refreshState, 30000);
+refreshWeather();
+restartStatePolling(true);
 setInterval(refreshWeather, 60000);
 setInterval(updateWeatherAge, 30000);
