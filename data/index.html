@@ -13,7 +13,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" sizes="192x192" href="/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
-  <link rel="stylesheet" href="/app.css?v=10">
+  <link rel="stylesheet" href="/app.css?v=13">
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -29,6 +29,7 @@
     <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 20 6v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zM9 12l2 2 4-5"/></symbol>
     <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19zM12 9v5m0 3h.01"/></symbol>
+    <symbol id="i-diagnostic" viewBox="0 0 24 24"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2"/></symbol>
   </svg>
 
   <div class="app-shell">
@@ -37,10 +38,7 @@
         <span class="brand-mark" aria-hidden="true">☀</span>
         <div><h1>PortailControl</h1><p id="networkBadge" class="network network-pending"><span></span>Connexion…</p></div>
       </div>
-      <div class="weather" aria-live="polite">
-        <div><strong id="weatherTemperature">-- °C</strong><span id="weatherDetail">Météo indisponible</span><small id="weatherAge">Aucune donnée</small></div>
-        <button id="refreshButton" class="icon-button" type="button" aria-label="Actualiser l’état et la météo"><svg><use href="#i-refresh"/></svg></button>
-      </div>
+      <button id="refreshButton" class="icon-button" type="button" aria-label="Actualiser l’état du portail"><svg><use href="#i-refresh"/></svg></button>
     </header>
 
     <div class="summer-scene" aria-hidden="true"><span class="sun"></span><span class="island"></span><span class="gate"></span><span class="wave wave-a"></span><span class="wave wave-b"></span></div>
@@ -75,6 +73,31 @@
         <div id="historyList" class="history-list" aria-live="polite"></div>
       </section>
 
+      <section id="view-diagnostic" class="view view-scroll" data-view="diagnostic" aria-labelledby="diagnosticTitle" hidden>
+        <div class="section-heading">
+          <div><p class="kicker">Surveillance locale</p><h2 id="diagnosticTitle">Diagnostic ESP32</h2></div>
+          <button id="diagnosticRefresh" class="icon-button light" type="button" aria-label="Actualiser le diagnostic"><svg><use href="#i-refresh"/></svg></button>
+        </div>
+        <p id="diagnosticUpdated" class="diagnostic-updated">En attente de la première mesure…</p>
+        <div id="diagnosticState" class="diagnostic-state" aria-live="polite">Connexion au diagnostic de l’ESP32…</div>
+        <dl class="diagnostic-grid">
+          <div><dt>Firmware</dt><dd id="diagnosticFirmware">--</dd></div>
+          <div><dt>Git</dt><dd id="diagnosticGit">--</dd></div>
+          <div><dt>Uptime</dt><dd id="diagnosticUptime">--</dd></div>
+          <div><dt>Dernier reset</dt><dd id="diagnosticResetReason">--</dd></div>
+          <div><dt>Démarrages</dt><dd id="diagnosticBootCount">--</dd></div>
+          <div><dt>Wi-Fi</dt><dd id="diagnosticWifi">--</dd></div>
+          <div><dt>RSSI</dt><dd id="diagnosticRssi">--</dd></div>
+          <div><dt>Adresse IP</dt><dd id="diagnosticIp">--</dd></div>
+          <div><dt>Reconnexions</dt><dd id="diagnosticReconnectCount">--</dd></div>
+          <div><dt>Point d’accès recovery</dt><dd id="diagnosticRecoveryAp">--</dd></div>
+          <div><dt>Heap libre</dt><dd id="diagnosticFreeHeap">--</dd></div>
+          <div><dt>Heap minimum</dt><dd id="diagnosticMinFreeHeap">--</dd></div>
+          <div><dt>Portail</dt><dd id="diagnosticPortalClosed">--</dd></div>
+          <div><dt>Relais</dt><dd id="diagnosticRelayActive">--</dd></div>
+        </dl>
+      </section>
+
       <section id="view-settings" class="view view-scroll" data-view="settings" aria-labelledby="settingsTitle" hidden>
         <div class="section-heading"><div><p class="kicker">Configuration locale</p><h2 id="settingsTitle">Réglages</h2></div><span class="section-emoji" aria-hidden="true">⛱</span></div>
         <nav class="settings-list" aria-label="Rubriques de réglages">
@@ -90,10 +113,11 @@
     <nav class="bottom-nav" aria-label="Navigation principale">
       <button type="button" class="nav-item is-active" data-target="home" aria-current="page"><svg><use href="#i-home"/></svg><span>Accueil</span></button>
       <button type="button" class="nav-item" data-target="history"><svg><use href="#i-history"/></svg><span>Historique</span></button>
+      <button type="button" class="nav-item" data-target="diagnostic"><svg><use href="#i-diagnostic"/></svg><span>Diagnostic</span></button>
       <button type="button" class="nav-item" data-target="settings"><svg><use href="#i-settings"/></svg><span>Réglages</span></button>
     </nav>
   </div>
 
-  <script src="/app.js?v=10" defer></script>
+  <script src="/app.js?v=13" defer></script>
 </body>
 </html>

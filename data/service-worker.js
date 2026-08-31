@@ -1,18 +1,19 @@
 'use strict';
 
-const CACHE_NAME = 'portailcontrol-static-v10';
+const CACHE_NAME = 'portailcontrol-static-v13';
+const CACHE_PREFIX = 'portailcontrol-static-';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/app.css?v=10',
-  '/app.js?v=10',
+  '/app.css?v=13',
+  '/app.js?v=13',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png'
 ];
 
 const NETWORK_ONLY_PATHS = new Set([
-  '/etat', '/api/weather', '/pieton', '/voiture', '/historique', '/log.txt', '/clear-log',
+  '/etat', '/api/diagnostic', '/pieton', '/voiture', '/historique', '/log.txt', '/clear-log',
   '/set-delay', '/set-notifications', '/save', '/delete-user', '/get-users',
   '/users.json', '/download-users', '/enrol', '/admin', '/users', '/settings',
   '/wifi_config', '/upload', '/upload.html', '/enrol.html'
@@ -25,7 +26,7 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil(caches.keys().then(keys => Promise.all(
-    keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
+    keys.filter(key => key.startsWith(CACHE_PREFIX) && key !== CACHE_NAME).map(key => caches.delete(key))
   )));
   self.clients.claim();
 });

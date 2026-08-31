@@ -1,6 +1,6 @@
 #pragma once
 
-constexpr const char *FIRMWARE_VERSION = "1.0.1-recovery";
+constexpr const char *FIRMWARE_VERSION = "1.0.2-recovery";
 
 #ifndef FIRMWARE_GIT_HASH
 #define FIRMWARE_GIT_HASH "unknown"

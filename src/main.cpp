@@ -8,7 +8,6 @@
 #include <Preferences.h>
 #include "wifi_manager.h"
 #include <time.h>
-#include <HTTPClient.h>
 #include <esp_task_wdt.h>
 #include <esp_system.h>
 #include "freertos/FreeRTOS.h"
@@ -30,31 +29,14 @@
 #define RELAIS_ACTIVE HIGH
 
 #define KEEPALIVE_INTERVAL 60000
-#define DAILY_RESTART_HOUR 3
-#define DAILY_RESTART_MIN 0
 #define WATCHDOG_TIMEOUT 30
-#define WEATHER_UPDATE_INTERVAL 900000UL
-#define WEATHER_RETRY_INTERVAL 60000UL
-#define WEATHER_HTTP_TIMEOUT_MS 4000
-#define WEATHER_TASK_STACK_SIZE 8192
-#define IFTTT_HTTP_TIMEOUT_MS 4000
-#define IFTTT_TASK_STACK_SIZE 6144
 #define LOG_MAX_SIZE_BYTES 65536UL
-
-const char *WEATHER_URL =
-  "http://api.open-meteo.com/v1/forecast"
-  "?latitude=43.1242&longitude=5.9280"
-  "&current=temperature_2m,apparent_temperature,weather_code"
-  "&timezone=Europe%2FParis&forecast_days=1";
 
 AsyncWebServer server(80);
 Preferences prefs;
 
 String enrolPassword = PORTAL_DEFAULT_ENROL_PASSWORD;
 unsigned long relaisDelay = RELAY_DELAY_DEFAULT_MS;
-bool notifOuverture = false;
-bool notifRappel = false;
-int delaiRappelMinutes = 10;
 
 unsigned long lastKeepAlive = 0;
 unsigned long relaisStartTime = 0;
@@ -65,28 +47,12 @@ bool relaySafetyReady = false;
 portMUX_TYPE relayMux = portMUX_INITIALIZER_UNLOCKED;
 bool spiffsAvailable = false;
 SemaphoreHandle_t spiffsMutex = nullptr;
-QueueHandle_t iftttQueue = nullptr;
 QueueHandle_t logQueue = nullptr;
 uint32_t bootCount = 0;
 esp_reset_reason_t lastResetReason = ESP_RST_UNKNOWN;
 bool mdnsActive = false;
 unsigned long mdnsNextAttemptAt = 0;
 
-struct WeatherSnapshot {
-  bool valid;
-  float temperature;
-  float apparentTemperature;
-  int weatherCode;
-  unsigned long fetchedAtMs;
-  char observedAt[25];
-};
-
-WeatherSnapshot weather = {false, 0.0f, 0.0f, -1, 0, ""};
-portMUX_TYPE weatherMux = portMUX_INITIALIZER_UNLOCKED;
-bool weatherRequestInProgress = false;
-bool weatherHasAttempted = false;
-unsigned long weatherLastAttemptAt = 0;
-int weatherLastError = 0;
 
 // -------------------------
 // Logs
@@ -182,169 +148,6 @@ void initialiserLog() {
 }
 
 // -------------------------
-// Notification IFTTT
-// -------------------------
-void iftttWorkerTask(void *parameter) {
-  (void)parameter;
-  uint8_t notification;
-  for (;;) {
-    if (xQueueReceive(iftttQueue, &notification, portMAX_DELAY) != pdTRUE) continue;
-    if (WiFi.status() != WL_CONNECTED) {
-      logEtatPortail("notification_ifttt_echec_wifi");
-      continue;
-    }
-
-    HTTPClient http;
-    http.setConnectTimeout(IFTTT_HTTP_TIMEOUT_MS);
-    http.setTimeout(IFTTT_HTTP_TIMEOUT_MS);
-    http.setReuse(false);
-    const bool started = http.begin(PORTAL_IFTTT_URL);
-    const int httpCode = started ? http.GET() : -1;
-    if (started) http.end();
-
-    if (httpCode >= 200 && httpCode < 300) {
-      logEtatPortail("notification_ifttt_envoyee");
-    } else {
-      Serial.printf("[IFTTT] Echec HTTP: %d\n", httpCode);
-      logEtatPortail("notification_ifttt_erreur");
-    }
-  }
-}
-
-void notifierPortailOuvert() {
-  const uint8_t notification = 1;
-  if (iftttQueue == nullptr || xQueueSend(iftttQueue, &notification, 0) != pdTRUE) {
-    logEtatPortail("notification_ifttt_file_pleine");
-  }
-}
-
-// -------------------------
-// Meteo Open-Meteo (tache reseau independante)
-// -------------------------
-void terminerRequeteMeteo() {
-  portENTER_CRITICAL(&weatherMux);
-  weatherRequestInProgress = false;
-  portEXIT_CRITICAL(&weatherMux);
-}
-
-void definirErreurMeteo(int errorCode) {
-  portENTER_CRITICAL(&weatherMux);
-  weatherLastError = errorCode;
-  portEXIT_CRITICAL(&weatherMux);
-}
-
-void recupererMeteoTask(void *parameter) {
-  (void)parameter;
-
-  if (WiFi.status() != WL_CONNECTED) {
-    definirErreurMeteo(-100);
-    terminerRequeteMeteo();
-    vTaskDelete(nullptr);
-    return;
-  }
-
-  WiFiClient client;
-  client.setTimeout(WEATHER_HTTP_TIMEOUT_MS);
-
-  HTTPClient http;
-  http.setConnectTimeout(WEATHER_HTTP_TIMEOUT_MS);
-  http.setTimeout(WEATHER_HTTP_TIMEOUT_MS);
-
-  bool updated = false;
-
-  if (http.begin(client, WEATHER_URL)) {
-    const int httpCode = http.GET();
-
-    if (httpCode == HTTP_CODE_OK) {
-      const String payload = http.getString();
-      JsonDocument doc;
-      DeserializationError error = deserializeJson(doc, payload);
-      JsonObject current = doc["current"];
-
-      if (!error &&
-          current["temperature_2m"].is<float>() &&
-          current["apparent_temperature"].is<float>() &&
-          current["weather_code"].is<int>() &&
-          current["time"].is<const char *>()) {
-        const float temperature = current["temperature_2m"].as<float>();
-        const float apparent = current["apparent_temperature"].as<float>();
-        const int code = current["weather_code"].as<int>();
-        const char *observedAt = current["time"].as<const char *>();
-
-        portENTER_CRITICAL(&weatherMux);
-        weather.valid = true;
-        weather.temperature = temperature;
-        weather.apparentTemperature = apparent;
-        weather.weatherCode = code;
-        weather.fetchedAtMs = millis();
-        strlcpy(weather.observedAt, observedAt, sizeof(weather.observedAt));
-        weatherLastError = 0;
-        portEXIT_CRITICAL(&weatherMux);
-
-        updated = true;
-        Serial.printf("[Weather] Toulon %.1f C, ressenti %.1f C, code %d\n",
-                      temperature, apparent, code);
-      } else {
-        definirErreurMeteo(error ? -102 : -103);
-        Serial.println("[Weather] Reponse JSON invalide");
-      }
-    } else {
-      definirErreurMeteo(httpCode);
-      Serial.printf("[Weather] Echec HTTP : %d\n", httpCode);
-    }
-
-    http.end();
-  } else {
-    definirErreurMeteo(-101);
-    Serial.println("[Weather] Initialisation HTTP impossible");
-  }
-
-  if (!updated) {
-    Serial.println("[Weather] Derniere valeur valide conservee");
-  }
-
-  terminerRequeteMeteo();
-  vTaskDelete(nullptr);
-}
-
-void gererMeteo() {
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  const unsigned long now = millis();
-  bool startRequest = false;
-
-  portENTER_CRITICAL(&weatherMux);
-  const unsigned long interval = weather.valid
-    ? WEATHER_UPDATE_INTERVAL
-    : WEATHER_RETRY_INTERVAL;
-
-  if (!weatherRequestInProgress &&
-      (!weatherHasAttempted || now - weatherLastAttemptAt >= interval)) {
-    weatherRequestInProgress = true;
-    weatherHasAttempted = true;
-    weatherLastAttemptAt = now;
-    startRequest = true;
-  }
-  portEXIT_CRITICAL(&weatherMux);
-
-  if (!startRequest) return;
-
-  const BaseType_t result = xTaskCreate(
-    recupererMeteoTask,
-    "open-meteo",
-    WEATHER_TASK_STACK_SIZE,
-    nullptr,
-    1,
-    nullptr
-  );
-
-  if (result != pdPASS) {
-    Serial.println("[Weather] Creation de la tache impossible");
-    terminerRequeteMeteo();
-  }
-}
-
-// -------------------------
 // WiFi
 // -------------------------
 void journaliserEvenementWiFi() {
@@ -360,35 +163,6 @@ void keepAliveLog() {
   Serial.printf("[KeepAlive] WiFi status: %d, IP: %s\n",
                 WiFi.status(),
                 WiFi.localIP().toString().c_str());
-}
-
-// -------------------------
-// Redémarrage quotidien
-// -------------------------
-void redemarrageQuotidien() {
-  static bool dejaRedemarreCetteMinute = false;
-
-  time_t now = time(nullptr);
-  struct tm *timeinfo = localtime(&now);
-
-  if (!timeinfo) return;
-
-  if (timeinfo->tm_hour == DAILY_RESTART_HOUR && timeinfo->tm_min == DAILY_RESTART_MIN) {
-    if (!dejaRedemarreCetteMinute) {
-      dejaRedemarreCetteMinute = true;
-      logEtatPortail("redemarrage_quotidien");
-      Serial.println("[System] Redémarrage quotidien à 3h00...");
-      portENTER_CRITICAL(&relayMux);
-      digitalWrite(RELAY_PIETON, RELAIS_REPOS);
-      digitalWrite(RELAY_VOITURE, RELAIS_REPOS);
-      relaisActif = false;
-      relaisEnCours = -1;
-      portEXIT_CRITICAL(&relayMux);
-      ESP.restart();
-    }
-  } else {
-    dejaRedemarreCetteMinute = false;
-  }
 }
 
 // -------------------------
@@ -564,34 +338,6 @@ void declarerRoutesActions() {
   });
 }
 
-void declarerRouteMeteo() {
-  server.on("/api/weather", HTTP_GET, [](AsyncWebServerRequest *request) {
-    WeatherSnapshot snapshot;
-    int lastError;
-
-    portENTER_CRITICAL(&weatherMux);
-    snapshot = weather;
-    lastError = weatherLastError;
-    portEXIT_CRITICAL(&weatherMux);
-
-    JsonDocument response;
-    response["available"] = snapshot.valid;
-    response["last_error"] = lastError;
-
-    if (snapshot.valid) {
-      response["temperature_2m"] = snapshot.temperature;
-      response["apparent_temperature"] = snapshot.apparentTemperature;
-      response["weather_code"] = snapshot.weatherCode;
-      response["observed_at"] = snapshot.observedAt;
-      response["age_seconds"] = (millis() - snapshot.fetchedAtMs) / 1000UL;
-    }
-
-    String payload;
-    serializeJson(response, payload);
-    request->send(snapshot.valid ? 200 : 503, "application/json", payload);
-  });
-}
-
 bool parseBoundedUnsigned(const String &value, unsigned long minimum,
                           unsigned long maximum, unsigned long &result) {
   if (value.isEmpty()) return false;
@@ -628,29 +374,6 @@ void declarerRoutesParametres() {
     request->redirect("/settings");
   });
 
-  server.on("/set-notifications", HTTP_POST, [](AsyncWebServerRequest *request) {
-    notifOuverture = request->hasParam("notif_ouverture", true);
-    notifRappel = request->hasParam("notif_rappel", true);
-
-    if (request->hasParam("delai_rappel", true)) {
-      unsigned long reminder = 0;
-      if (!parseBoundedUnsigned(request->getParam("delai_rappel", true)->value(), 1, 1440, reminder)) {
-        request->send(400, "text/plain", "Delai de rappel invalide (1-1440 min)");
-        return;
-      }
-      delaiRappelMinutes = static_cast<int>(reminder);
-    }
-
-    prefs.begin("portail", false);
-    prefs.putBool("notif_ouverture", notifOuverture);
-    prefs.putBool("notif_rappel", notifRappel);
-    prefs.putInt("rappel_minutes", delaiRappelMinutes);
-    prefs.end();
-
-    logEtatPortail("parametres_notifications_modifies");
-
-    request->redirect("/settings");
-  });
 }
 
 // -------------------------
@@ -847,10 +570,6 @@ void setup() {
                   ? static_cast<unsigned long>(storedRelayDelay)
                   : RELAY_DELAY_DEFAULT_MS;
   enrolPassword = prefs.getString("enrol_pwd", PORTAL_DEFAULT_ENROL_PASSWORD);
-  notifOuverture = prefs.getBool("notif_ouverture", false);
-  notifRappel = prefs.getBool("notif_rappel", false);
-  delaiRappelMinutes = prefs.getInt("rappel_minutes", 10);
-  if (delaiRappelMinutes < 1 || delaiRappelMinutes > 1440) delaiRappelMinutes = 10;
   bootCount = prefs.getUInt("boot_count", 0) + 1;
   prefs.putUInt("boot_count", bootCount);
   prefs.end();
@@ -860,17 +579,7 @@ void setup() {
   if (!relaySafetyReady) {
     Serial.println("[Relay] ERREUR: tache de securite non creee");
   }
-  iftttQueue = xQueueCreate(4, sizeof(uint8_t));
-  if (iftttQueue != nullptr &&
-      xTaskCreate(iftttWorkerTask, "ifttt", IFTTT_TASK_STACK_SIZE, nullptr, 1, nullptr) != pdPASS) {
-    vQueueDelete(iftttQueue);
-    iftttQueue = nullptr;
-    Serial.println("[IFTTT] Notifications desactivees: tache non creee");
-  }
-
   setupWiFi();
-
-  configTime(3600, 0, "pool.ntp.org", "time.nist.gov");
 
   handleMdns();
 
@@ -880,7 +589,6 @@ void setup() {
 
   declarerRoutesPages();
   declarerRoutesActions();
-  declarerRouteMeteo();
   declarerRouteDiagnostic();
   declarerRoutesParametres();
   declarerRoutesLogs();
@@ -905,7 +613,6 @@ void loop() {
   ArduinoOTA.handle();
 
   gererRelais();
-  gererMeteo();
   handleWiFi();
   journaliserEvenementWiFi();
   handleMdns();
@@ -921,38 +628,15 @@ void loop() {
     keepAliveLog();
   }
 
-  redemarrageQuotidien();
-
   static bool etatPrec = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
   bool etatActuel = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
-
-  static unsigned long tempsOuverture = 0;
-  static bool alerteEnvoyee = false;
 
   if (etatActuel != etatPrec) {
     String etatStr = etatActuel ? "ferme" : "ouvert";
 
     logEtatPortail(etatStr);
 
-    if (notifOuverture) {
-      notifierPortailOuvert();
-    }
-
     etatPrec = etatActuel;
-
-    if (!etatActuel) {
-      tempsOuverture = millis();
-      alerteEnvoyee = false;
-    }
-  }
-
-  if (!etatActuel &&
-      notifRappel &&
-      !alerteEnvoyee &&
-      millis() - tempsOuverture > (unsigned long)(delaiRappelMinutes * 60000)) {
-    logEtatPortail("alerte_portail_ouvert_trop_longtemps");
-    notifierPortailOuvert();
-    alerteEnvoyee = true;
   }
 
   delay(10);

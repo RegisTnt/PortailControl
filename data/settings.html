@@ -39,14 +39,6 @@
     <input type="submit" value="Mettre à jour">
   </form>
 
-  <form action="/set-notifications" method="POST">
-    <h2>Notifications</h2>
-    <label><input type="checkbox" name="notif_ouverture" value="1"> 🔔 Notifier à chaque ouverture/fermeture</label><br><br>
-    <label><input type="checkbox" name="notif_rappel" value="1"> ⏰ Me rappeler si le portail reste ouvert plus de </label>
-    <input type="number" name="delai_rappel" min="1" max="60" value="10"> minutes<br><br>
-    <input type="submit" value="Enregistrer les notifications">
-  </form>
-
   <a href="/users" class="link-button">👥 Gérer les utilisateurs</a><br><br>
   <a href="/admin" class="link-button admin-button">🛡️ Administration</a><br><br>
   <a href="/historique" class="link-button history-button">📄 Historique du Portail</a><br><br>

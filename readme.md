@@ -12,13 +12,12 @@ Firmware Arduino pour une carte `esp32dev` qui pilote deux contacts secs de port
 
 L'impulsion dure 500 ms par défaut ou la valeur déjà persistée dans Preferences. `/voiture` est une impulsion unique vers le contrôleur : elle ne garantit pas le sens du mouvement et ne doit pas être présentée comme une commande séparée OUVRIR ou FERMER.
 
-Le firmware utilise ESPAsyncWebServer, AsyncTCP, ArduinoJson, SPIFFS, Preferences, mDNS, ArduinoOTA, HTTPClient, NTP et le watchdog ESP32. Le contrat exact des routes se trouve dans [`docs/api-contract.md`](docs/api-contract.md).
+Le firmware utilise ESPAsyncWebServer, AsyncTCP, ArduinoJson, SPIFFS, Preferences, mDNS, ArduinoOTA et le watchdog ESP32. Son fonctionnement normal reste limité au réseau local. Le contrat exact des routes se trouve dans [`docs/api-contract.md`](docs/api-contract.md).
 
 ## PWA locale
 
 L'interface principale est une Progressive Web App sans CDN ni dépendance Internet. Elle fournit :
 
-- météo actuelle de Toulon via Open-Meteo : température réelle, température ressentie, code météo et âge de la mesure ;
 - état du capteur et heure de dernière actualisation ;
 - commandes tactiles contextuelles : deux ouvertures si le capteur confirme la fermeture, sinon une impulsion complète libellée **Fermer le portail** ;
 - envoi direct au toucher, timeout de 5 s et anti-double-appui de 3 s ;
@@ -28,7 +27,7 @@ L'interface principale est une Progressive Web App sans CDN ni dépendance Inter
 
 La nouvelle interface adopte un thème « vacances d'été méditerranéennes » entièrement réalisé en CSS et SVG inline : bleu profond, azur, turquoise, jaune solaire, sable clair et cartes blanches. Une page unique regroupe trois vues accessibles par une navigation inférieure fixe :
 
-- **Accueil** compact : connexion, météo, capteur, commandes adaptées à l'état et rappel de sécurité ;
+- **Accueil** compact : connexion locale, capteur, commandes adaptées à l'état et rappel de sécurité ;
 - **Historique** : lecture réseau de `log.txt`, regroupement par date et cartes d'événements ;
 - **Réglages** : accès aux pages Paramètres, Wi-Fi, Utilisateurs et Administration.
 
@@ -36,9 +35,7 @@ L'accueil est dimensionné pour rester sans défilement sur les smartphones cour
 
 L'état du capteur est relu automatiquement sans rechargement de page : toutes les 2 secondes lorsque l'application est visible et toutes les 15 secondes en arrière-plan. Une seule requête `/etat` peut être active à la fois et son timeout est limité à 1,8 seconde. Après deux échecs consécutifs, l'interface passe en état inaccessible sans répéter d'alerte ; une réponse valide rétablit automatiquement l'affichage. Le bouton d'actualisation manuel reste disponible.
 
-Le service worker met uniquement en cache la coquille statique (`index.html`, CSS, JavaScript, manifeste et icônes). Les routes d'état, de météo, de commande, d'historique, de journal et d'administration restent réseau uniquement. Hors ligne, l'interface peut s'afficher, mais une commande échoue immédiatement et n'est jamais rejouée plus tard.
-
-La météo est récupérée sans clé API dans une tâche réseau séparée après la connexion Wi-Fi, puis toutes les 15 minutes. Tant qu'aucune valeur valide n'existe, une nouvelle tentative est faite après 1 minute. L'appel HTTP utilise un timeout de 4 s et ne bloque jamais la boucle de commande du portail. La dernière valeur valide reste disponible en RAM si Internet ou Open-Meteo deviennent indisponibles. Après un redémarrage, l'interface affiche **Météo indisponible** jusqu'au premier succès.
+Le service worker met uniquement en cache la coquille statique (`index.html`, CSS, JavaScript, manifeste et icônes). Les routes d'état, de diagnostic, de commande, d'historique, de journal et d'administration restent réseau uniquement. Hors ligne, l'interface peut s'afficher, mais une commande échoue immédiatement et n'est jamais rejouée plus tard.
 
 > L'installation PWA exige normalement un contexte sécurisé. Les navigateurs acceptent `localhost`, mais une adresse HTTP privée servie directement par l'ESP32 peut ne pas proposer l'installation selon le navigateur et sa version. Le manifeste et le service worker restent utilisables dès que le contexte est accepté.
 
@@ -53,9 +50,9 @@ Sur Android, l'option se trouve dans le menu du navigateur. Sous Windows, elle a
 
 ## Configuration et secrets
 
-Copier `include/config.example.h` vers `include/config.h`, puis renseigner localement le mot de passe d'enrôlement par défaut, le mot de passe OTA et l'URL IFTTT. `include/config.h` est ignoré par Git. Les identifiants Wi-Fi sont saisis sur le point d'accès `Portail_Config` et stockés dans Preferences.
+Copier `include/config.example.h` vers `include/config.h`, puis renseigner localement le mot de passe d'enrôlement par défaut et le mot de passe OTA. `include/config.h` est ignoré par Git. Les identifiants Wi-Fi sont saisis sur le point d'accès `Portail_Config` et stockés dans Preferences.
 
-Les secrets qui étaient auparavant présents dans l'historique Git doivent être considérés compromis et remplacés côté OTA/IFTTT. Ne jamais versionner un SSID, mot de passe, jeton, IP publique ou clé d'API.
+Les secrets qui étaient auparavant présents dans l'historique Git doivent être considérés compromis. Ne jamais versionner un SSID, mot de passe, jeton, IP publique ou clé d'API.
 
 ## Compilation
 

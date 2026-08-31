@@ -6,12 +6,10 @@ const STATE_REQUEST_TIMEOUT_MS = 1800;
 const STATE_POLL_VISIBLE_MS = 2000;
 const STATE_POLL_HIDDEN_MS = 15000;
 const STATE_FAILURE_THRESHOLD = 2;
+const DIAGNOSTIC_POLL_MS = 5000;
 
 const elements = {
   network: document.querySelector('#networkBadge'),
-  weatherTemperature: document.querySelector('#weatherTemperature'),
-  weatherDetail: document.querySelector('#weatherDetail'),
-  weatherAge: document.querySelector('#weatherAge'),
   statusCard: document.querySelector('#statusCard'),
   status: document.querySelector('#gateStatus'),
   detail: document.querySelector('#statusDetail'),
@@ -30,12 +28,29 @@ const elements = {
   installHint: document.querySelector('#installHint')
 };
 
+const diagnosticElements = {
+  refresh: document.querySelector('#diagnosticRefresh'),
+  updated: document.querySelector('#diagnosticUpdated'),
+  state: document.querySelector('#diagnosticState'),
+  firmware: document.querySelector('#diagnosticFirmware'),
+  git: document.querySelector('#diagnosticGit'),
+  uptime: document.querySelector('#diagnosticUptime'),
+  resetReason: document.querySelector('#diagnosticResetReason'),
+  bootCount: document.querySelector('#diagnosticBootCount'),
+  wifi: document.querySelector('#diagnosticWifi'),
+  rssi: document.querySelector('#diagnosticRssi'),
+  ip: document.querySelector('#diagnosticIp'),
+  reconnectCount: document.querySelector('#diagnosticReconnectCount'),
+  recoveryAp: document.querySelector('#diagnosticRecoveryAp'),
+  freeHeap: document.querySelector('#diagnosticFreeHeap'),
+  minFreeHeap: document.querySelector('#diagnosticMinFreeHeap'),
+  portalClosed: document.querySelector('#diagnosticPortalClosed'),
+  relayActive: document.querySelector('#diagnosticRelayActive')
+};
+
 let commandLocked = false;
 let portalReachable = false;
 let installPrompt = null;
-let weatherAgeAtFetch = null;
-let weatherReceivedAt = 0;
-let hasWeatherValue = false;
 let historyLoaded = false;
 let stateRequestInProgress = false;
 let statePollTimer = null;
@@ -44,6 +59,9 @@ let lastNetworkStatus = null;
 let lastNetworkLabel = '';
 let lastStateUpdateAt = 0;
 let consecutiveStateFailures = 0;
+let currentView = 'home';
+let diagnosticRequestInProgress = false;
+let diagnosticPollTimer = null;
 
 async function directFetch(path) {
   if (!navigator.onLine) throw new Error('Le navigateur est hors ligne. Aucune commande n’est envoyée.');
@@ -72,63 +90,6 @@ function setNetwork(kind, label) {
 function showMessage(text, kind = '') {
   elements.message.className = kind ? `message message-${kind}` : 'message';
   elements.message.textContent = text;
-}
-
-function weatherLabel(code) {
-  if (code === 0) return 'Ciel dégagé';
-  if ([1, 2, 3].includes(code)) return code === 3 ? 'Couvert' : 'Peu nuageux';
-  if ([45, 48].includes(code)) return 'Brouillard';
-  if (code >= 51 && code <= 57) return 'Bruine';
-  if (code >= 61 && code <= 67) return 'Pluie';
-  if (code >= 71 && code <= 77) return 'Neige';
-  if (code >= 80 && code <= 82) return 'Averses';
-  if (code >= 85 && code <= 86) return 'Averses de neige';
-  if (code >= 95 && code <= 99) return 'Orage';
-  return `Code météo ${code}`;
-}
-
-function formatWeatherAge(seconds) {
-  if (seconds < 60) return 'à l’instant';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `il y a ${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  return `il y a ${hours} h ${minutes % 60} min`;
-}
-
-function updateWeatherAge() {
-  if (weatherAgeAtFetch === null) return;
-  const elapsed = Math.floor((Date.now() - weatherReceivedAt) / 1000);
-  elements.weatherAge.textContent = formatWeatherAge(weatherAgeAtFetch + elapsed);
-}
-
-async function refreshWeather() {
-  try {
-    const response = await directFetch('/api/weather');
-    const data = await response.json();
-    const temperature = Number(data.temperature_2m);
-    const apparent = Number(data.apparent_temperature);
-    const code = Number(data.weather_code);
-    const age = Number(data.age_seconds);
-    if (!response.ok || !data.available || !Number.isFinite(temperature) ||
-        !Number.isFinite(apparent) || !Number.isInteger(code) || !Number.isFinite(age)) {
-      throw new Error('Aucune donnée météo valide.');
-    }
-    elements.weatherTemperature.textContent = `${temperature.toFixed(1)} °C`;
-    elements.weatherDetail.textContent = `Ressenti ${apparent.toFixed(1)} °C · ${weatherLabel(code)}`;
-    weatherAgeAtFetch = Math.max(0, Math.floor(age));
-    weatherReceivedAt = Date.now();
-    hasWeatherValue = true;
-    updateWeatherAge();
-  } catch (error) {
-    if (hasWeatherValue) {
-      elements.weatherAge.textContent = `Dernière valeur · ${elements.weatherAge.textContent}`;
-      return;
-    }
-    elements.weatherTemperature.textContent = '-- °C';
-    elements.weatherDetail.textContent = 'Météo indisponible';
-    elements.weatherAge.textContent = 'Aucune donnée';
-    weatherAgeAtFetch = null;
-  }
 }
 
 function setGateState(kind, title, detail) {
@@ -215,7 +176,7 @@ async function refreshAll() {
   elements.refresh.classList.add('is-loading');
   elements.refresh.disabled = true;
   try {
-    await Promise.allSettled([refreshState(), refreshWeather()]);
+    await refreshState();
   } finally {
     elements.refresh.disabled = false;
     elements.refresh.classList.remove('is-loading');
@@ -361,8 +322,81 @@ async function loadHistory() {
   }
 }
 
+function formatUptime(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${days} j · ${hours} h · ${minutes} min`;
+}
+
+function formatBytes(value) {
+  const bytes = Number(value);
+  return Number.isFinite(bytes) ? `${Math.round(bytes / 1024)} Ko` : '--';
+}
+
+function renderHealth(data) {
+  const wifi = data?.wifi ?? {};
+  const memory = data?.memory ?? {};
+  const portal = data?.portal ?? {};
+
+  diagnosticElements.firmware.textContent = data?.firmware || '--';
+  diagnosticElements.git.textContent = data?.git || '--';
+  diagnosticElements.uptime.textContent = formatUptime(data?.uptime_seconds);
+  diagnosticElements.resetReason.textContent = data?.reset_reason || '--';
+  diagnosticElements.bootCount.textContent = Number.isFinite(Number(data?.boot_count)) ? String(data.boot_count) : '--';
+  diagnosticElements.wifi.textContent = wifi.connected === true ? 'Connecté' : wifi.connected === false ? 'Déconnecté' : '--';
+  diagnosticElements.rssi.textContent = Number.isFinite(Number(wifi.rssi)) ? `${wifi.rssi} dBm` : '--';
+  diagnosticElements.ip.textContent = wifi.ip || '--';
+  diagnosticElements.reconnectCount.textContent = Number.isFinite(Number(wifi.reconnect_count)) ? String(wifi.reconnect_count) : '--';
+  diagnosticElements.recoveryAp.textContent = wifi.recovery_ap === true ? 'Actif' : wifi.recovery_ap === false ? 'Inactif' : '--';
+  diagnosticElements.freeHeap.textContent = formatBytes(memory.free_heap);
+  diagnosticElements.minFreeHeap.textContent = formatBytes(memory.min_free_heap);
+  diagnosticElements.portalClosed.textContent = portal.closed === true ? 'Fermé' : portal.closed === false ? 'Non fermé' : '--';
+  diagnosticElements.relayActive.textContent = portal.relay_active === true ? 'Actif' : portal.relay_active === false ? 'Inactif' : '--';
+  diagnosticElements.state.className = `diagnostic-state ${wifi.connected === true && portal.relay_active === false ? 'diagnostic-ok' : 'diagnostic-warning'}`;
+  diagnosticElements.state.textContent = wifi.connected === false
+    ? 'ESP32 accessible, Wi-Fi signalé déconnecté'
+    : portal.relay_active === true
+      ? 'Relais actuellement actif'
+      : 'Diagnostic recovery disponible';
+  diagnosticElements.updated.textContent = `Actualisé à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+}
+
+function renderHealthUnavailable() {
+  diagnosticElements.state.className = 'diagnostic-state diagnostic-error';
+  diagnosticElements.state.textContent = 'Diagnostic temporairement indisponible';
+  diagnosticElements.updated.textContent = `Dernière tentative à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+}
+
+async function refreshHealth() {
+  if (diagnosticRequestInProgress) return;
+  diagnosticRequestInProgress = true;
+  diagnosticElements.refresh.classList.add('is-loading');
+  diagnosticElements.refresh.disabled = true;
+  try {
+    const response = await directFetch('/api/diagnostic');
+    if (!response.ok) throw new Error(`Diagnostic indisponible (HTTP ${response.status}).`);
+    renderHealth(await response.json());
+  } catch (error) {
+    renderHealthUnavailable();
+  } finally {
+    diagnosticElements.refresh.disabled = false;
+    diagnosticElements.refresh.classList.remove('is-loading');
+    diagnosticRequestInProgress = false;
+  }
+}
+
+function restartDiagnosticPolling(immediate = false) {
+  clearInterval(diagnosticPollTimer);
+  if (currentView !== 'diagnostic' || document.visibilityState !== 'visible') return;
+  if (immediate) refreshHealth();
+  diagnosticPollTimer = setInterval(refreshHealth, DIAGNOSTIC_POLL_MS);
+}
+
 function showView(name, updateHash = true) {
-  const target = ['home', 'history', 'settings'].includes(name) ? name : 'home';
+  const target = ['home', 'history', 'diagnostic', 'settings'].includes(name) ? name : 'home';
+  currentView = target;
   document.querySelectorAll('.view').forEach(view => {
     const active = view.dataset.view === target;
     view.hidden = !active;
@@ -375,6 +409,7 @@ function showView(name, updateHash = true) {
   });
   if (updateHash) history.replaceState(null, '', target === 'home' ? location.pathname : `#${target}`);
   if (target === 'history' && !historyLoaded) loadHistory();
+  if (target === 'diagnostic') restartDiagnosticPolling(true); else clearInterval(diagnosticPollTimer);
   document.querySelector(`[data-view="${target}"] h2`)?.focus?.({ preventScroll: true });
 }
 
@@ -385,11 +420,12 @@ elements.vehicle.addEventListener('click', () => sendCommand('/voiture', element
 elements.close.addEventListener('click', () => sendCommand('/voiture', elements.close));
 elements.refresh.addEventListener('click', refreshAll);
 elements.historyRefresh.addEventListener('click', loadHistory);
+diagnosticElements.refresh.addEventListener('click', refreshHealth);
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => showView(item.dataset.target)));
 window.addEventListener('hashchange', () => showView(location.hash.slice(1), false));
 window.addEventListener('online', () => {
-  refreshWeather();
   restartStatePolling(true);
+  if (currentView === 'diagnostic') restartDiagnosticPolling(true);
 });
 window.addEventListener('offline', () => {
   consecutiveStateFailures = STATE_FAILURE_THRESHOLD;
@@ -402,9 +438,11 @@ window.addEventListener('offline', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     restartStatePolling(true);
+    if (currentView === 'diagnostic') restartDiagnosticPolling(true);
   } else {
     updateRefreshIndicator(false);
     restartStatePolling(false);
+    clearInterval(diagnosticPollTimer);
   }
 });
 
@@ -432,7 +470,4 @@ if ('serviceWorker' in navigator) {
 }
 
 showView(location.hash.slice(1), false);
-refreshWeather();
 restartStatePolling(true);
-setInterval(refreshWeather, 60000);
-setInterval(updateWeatherAge, 30000);

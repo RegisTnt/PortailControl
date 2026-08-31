@@ -18,7 +18,6 @@ Niveaux de danger utilisés : **faible** (lecture), **modéré** (données/confi
 | Méthode | Chemin | Rôle et paramètres | Réponse, MIME et exemple | Codes observables | Répétition et temporisation |
 |---|---|---|---|---|---|
 | GET | `/etat` | Lit `GPIO 34`. Aucun paramètre. | `text/plain`, `ferme` ou `ouvert`. | 200. | Faible, répétable. 1 s minimum recommandé pour un client interactif. Réseau direct, jamais de cache. |
-| GET | `/api/weather` | Lit la dernière météo valide de Toulon conservée en RAM. Aucun accès Internet n'est déclenché par cette route. | `application/json`. Disponible : `{"available":true,"last_error":0,"temperature_2m":27.3,"apparent_temperature":28.1,"weather_code":1,"observed_at":"2026-07-14T17:15","age_seconds":42}`. Indisponible : `{"available":false,"last_error":-1}`. | 200 avec une valeur valide, 503 avant le premier succès. `last_error` vaut 0 après un succès et sert au diagnostic réseau en cas d'échec. | Faible, répétable. Réseau direct, jamais de cache. Les données sont perdues au redémarrage puis récupérées après connexion Wi-Fi. |
 | GET | `/log.txt` | Lit le journal SPIFFS. | `text/plain`, ex. `Horodatage;État\n2026-07-14 10:20:30;ferme`. En-tête `Content-Disposition: inline`. | 200, 404 si absent, 500 si ouverture impossible. | Faible, répétable sur action utilisateur. Réseau direct, jamais de cache. |
 | GET | `/get-users` | Lit la table JSON des utilisateurs. | `application/json`, `{}` si le fichier n'existe pas. | 200. | Modéré : expose les jetons éventuels. Pas de polling. |
 | GET | `/users.json` | Lit directement la table JSON. | `application/json`, ex. `{}`. | 200, ou 404 avec `{}`. | Modéré : expose les jetons éventuels. Pas de cache. |
@@ -47,7 +46,6 @@ Ces routes journalisent la demande avant d'appeler `activerRelais`. Une réponse
 | Méthode | Chemin | Paramètres | Réponse, MIME et exemple | Codes observables | Effet, danger et répétition |
 |---|---|---|---|---|---|
 | POST | `/set-delay` | Corps formulaire `delai`. La valeur est convertie par `toInt()` sans validation serveur. | Redirection vers `/settings` (corps HTML de redirection). | 302. | **Modifie la durée physique persistée du relais : danger élevé.** Action administrative non répétable automatiquement. L'UI actuelle propose 100–5000 ms, mais le serveur n'impose pas ces bornes. |
-| POST | `/set-notifications` | `notif_ouverture`, `notif_rappel` (présence = vrai), `delai_rappel` en minutes. | Redirection vers `/settings`. | 302. | Modéré. Persisté dans Preferences. Pas de retry automatique. |
 | GET | `/clear-log` | Aucun paramètre. | `text/plain`, `Historique effacé !`. | 200, y compris si la recréation du fichier échoue. | Destructif, modéré. Confirmation humaine obligatoire, jamais automatisé. |
 | GET | `/delete-user?name=...` | Query `name` obligatoire. | Redirection `/users` ou erreur `text/plain`. | 302, 400, 500. | Destructif, modéré. Non idempotent et sans authentification. |
 | POST | `/save` | Disponible quand le mode point d'accès est initialisé. Corps formulaire `ssid`, `password`. | `text/plain`, `Sauvegarde réussie. Redémarrage...`. | 200 ; paramètres absents susceptibles de provoquer une erreur interne. | **Enregistre les identifiants Wi-Fi puis redémarre l'ESP32 : danger élevé.** Action humaine locale uniquement, aucun retry. |
@@ -74,10 +72,7 @@ Les fichiers web contiennent encore des appels ou formulaires vers `POST /enrol`
 ## Services non HTTP et reprise après erreur
 
 - Wi-Fi : identifiants stockés dans Preferences ; tentative initiale de 10 s, puis point d'accès `Portail_Config`; auto-reconnexion ESP32 et contrôle toutes les 10 s.
-- Météo : tâche FreeRTOS indépendante après connexion Wi-Fi, puis toutes les 15 minutes après un succès. Tant qu'aucune valeur valide n'existe, une tentative est refaite après 1 minute. Open-Meteo est interrogé pour Toulon (`43.1242`, `5.9280`) avec un timeout de 4 s. Un échec conserve la dernière valeur valide et n'interagit jamais avec les relais.
 - mDNS : `portail.local`.
 - OTA Arduino : hostname `portail-esp32`, mot de passe local dans `include/config.h`.
 - Watchdog : 30 s, alimenté dans `loop()`.
-- Redémarrage quotidien : 03:00 heure issue de NTP (`UTC+1` fixe dans le code).
 - Journal série : 115200 bauds ; journal persistant SPIFFS en CSV séparé par `;`.
-- Notifications : webhook IFTTT sur changement d'état si activé et rappel configurable si non fermé. Aucune intégration Home Assistant, Alexa ou MQTT n'a été trouvée.
