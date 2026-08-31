@@ -9,3 +9,8 @@ in the development cycle.
 
 More information about PlatformIO Unit Testing:
 - https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+
+Host-only debounce validation (does not access or upload to the ESP32):
+
+    g++ -std=c++17 -Wall -Wextra -Werror test/host/test_sensor_debounce.cpp -o .pio/test_sensor_debounce
+    .pio/test_sensor_debounce

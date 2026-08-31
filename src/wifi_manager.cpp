@@ -8,6 +8,7 @@ namespace {
 constexpr unsigned long INITIAL_RECONNECT_DELAY_MS = 5000;
 constexpr unsigned long MAX_RECONNECT_DELAY_MS = 60000;
 constexpr unsigned long RECOVERY_AP_AFTER_MS = 300000;
+constexpr unsigned long SIGNIFICANT_OUTAGE_MS = 30000;
 constexpr unsigned long RESTART_AFTER_SAVE_MS = 1000;
 constexpr size_t MAX_SSID_LENGTH = 32;
 constexpr size_t MAX_PASSWORD_LENGTH = 63;
@@ -21,6 +22,8 @@ unsigned long disconnectedSince = 0;
 unsigned long nextReconnectAt = 0;
 unsigned long reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
 uint32_t reconnectCount = 0;
+uint32_t lastOutageDurationSeconds = 0;
+bool lossPublished = false;
 bool recoveryAPActive = false;
 bool restartPending = false;
 unsigned long restartRequestedAt = 0;
@@ -69,15 +72,20 @@ void beginStationConnection() {
 void onWiFiEvent(WiFiEvent_t event) {
   if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
     const bool wasDisconnected = disconnectedSince != 0;
+    const unsigned long outageDuration = wasDisconnected ? millis() - disconnectedSince : 0;
     state = WiFiRecoveryState::CONNECTED;
     reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+    if (wasDisconnected && lossPublished) {
+      lastOutageDurationSeconds = outageDuration / 1000UL;
+      publishEvent(WiFiRecoveryEvent::RECONNECTED);
+    }
     disconnectedSince = 0;
-    if (wasDisconnected) publishEvent(WiFiRecoveryEvent::RECONNECTED);
+    lossPublished = false;
     Serial.printf("[WiFi] Connected: %s\n", WiFi.localIP().toString().c_str());
   } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
     if (disconnectedSince == 0) {
       disconnectedSince = millis();
-      publishEvent(WiFiRecoveryEvent::LOST);
+      lossPublished = false;
     }
     state = recoveryAPActive ? WiFiRecoveryState::RECOVERY_AP : WiFiRecoveryState::DISCONNECTED;
     nextReconnectAt = millis() + reconnectDelay;
@@ -150,6 +158,10 @@ void handleWiFi() {
     }
   }
   if (restartPending || WiFi.status() == WL_CONNECTED || configuredSsid.isEmpty()) return;
+  if (!lossPublished && disconnectedSince != 0 && now - disconnectedSince >= SIGNIFICANT_OUTAGE_MS) {
+    lossPublished = true;
+    publishEvent(WiFiRecoveryEvent::LOST);
+  }
   if (!recoveryAPActive && disconnectedSince != 0 && now - disconnectedSince >= RECOVERY_AP_AFTER_MS) {
     startRecoveryAP();
   }
@@ -163,6 +175,7 @@ WiFiRecoveryEvent consumeWiFiRecoveryEvent() {
   return event;
 }
 uint32_t getWiFiReconnectCount() { return reconnectCount; }
+uint32_t getLastWiFiOutageDurationSeconds() { return lastOutageDurationSeconds; }
 bool isWiFiRecoveryAPActive() { return recoveryAPActive; }
 bool isWiFiRestartPending() {
   return restartPending && millis() - restartRequestedAt >= RESTART_AFTER_SAVE_MS;

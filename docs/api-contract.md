@@ -1,4 +1,4 @@
-# Contrat HTTP de PortailControl
+# Contrat HTTP de PortailControl 1.0.3-recovery
 
 Ce document décrit le firmware présent dans `src/main.cpp` et `src/wifi_manager.cpp` au 14 juillet 2026. Le serveur écoute en HTTP non chiffré sur le port 80. Les corps sont du texte brut sauf indication contraire. Aucune route n'applique actuellement d'authentification, même si certaines pages et l'ancien README laissent entendre le contraire.
 
@@ -17,8 +17,9 @@ Niveaux de danger utilisés : **faible** (lecture), **modéré** (données/confi
 
 | Méthode | Chemin | Rôle et paramètres | Réponse, MIME et exemple | Codes observables | Répétition et temporisation |
 |---|---|---|---|---|---|
-| GET | `/etat` | Lit `GPIO 34`. Aucun paramètre. | `text/plain`, `ferme` ou `ouvert`. | 200. | Faible, répétable. 1 s minimum recommandé pour un client interactif. Réseau direct, jamais de cache. |
-| GET | `/log.txt` | Lit le journal SPIFFS. | `text/plain`, ex. `Horodatage;État\n2026-07-14 10:20:30;ferme`. En-tête `Content-Disposition: inline`. | 200, 404 si absent, 500 si ouverture impossible. | Faible, répétable sur action utilisateur. Réseau direct, jamais de cache. |
+| GET | `/etat` | Lit l'état stable débouncé de `GPIO 34`. Aucun paramètre. | `text/plain`, `ferme` ou `ouvert`. | 200. | Faible, répétable. Réseau direct, jamais de cache. |
+| GET | `/api/diagnostic` | État recovery, Wi-Fi, mémoire, relais, capteur brut/stable et horloge. | `application/json`. | 200. | Faible, répétable. Réseau direct, jamais de cache. |
+| GET | `/log.txt` | Lit le journal SPIFFS. | `text/plain`, horodatage `epoch:<unix>` ou `boot:<id>+<uptime>`. | 200, 404 si absent, 500 si ouverture impossible. | Faible, répétable sur action utilisateur. Réseau direct, jamais de cache. |
 | GET | `/get-users` | Lit la table JSON des utilisateurs. | `application/json`, `{}` si le fichier n'existe pas. | 200. | Modéré : expose les jetons éventuels. Pas de polling. |
 | GET | `/users.json` | Lit directement la table JSON. | `application/json`, ex. `{}`. | 200, ou 404 avec `{}`. | Modéré : expose les jetons éventuels. Pas de cache. |
 | GET | `/download-users` | Télécharge `users.json`. | `application/json`, pièce jointe `users.json`. | 200 ou 404 `text/plain`. | Modéré. Action humaine uniquement. |
@@ -39,14 +40,15 @@ Niveaux de danger utilisés : **faible** (lecture), **modéré** (données/confi
 | GET | `/pieton` | Demande l'impulsion piétonne. Aucun paramètre. | `text/plain`, `Piéton activé !`. | Toujours 200 après traitement de la route. | **GPIO 16 / relais réel, danger élevé. Non idempotent : ne jamais répéter automatiquement.** Attendre au moins 3 s côté UI et exiger une nouvelle action humaine. Relire `/etat`, sans en déduire le mouvement immédiat. |
 | GET | `/voiture` | Demande l'impulsion complète. Aucun paramètre. | `text/plain`, `Voiture activée !`. | Toujours 200 après traitement de la route. | **GPIO 17 / relais réel, danger élevé. Non idempotent : ne jamais répéter automatiquement.** Cette impulsion ne garantit pas la direction. Attendre au moins 3 s côté UI et exiger une nouvelle action humaine. |
 
-Ces routes journalisent la demande avant d'appeler `activerRelais`. Une réponse 200 signifie « requête traitée par le handler », pas « relais actionné » ni « portail déplacé ». Si un relais est déjà actif, la nouvelle impulsion est ignorée mais le code HTTP reste 200.
+Ces routes ne journalisent que les commandes acceptées par `activerRelais`. Si un relais est déjà actif, elles répondent HTTP 409. Une réponse 200 confirme l'impulsion, jamais le déplacement physique du portail.
 
 ## 3. Administration ou maintenance
 
 | Méthode | Chemin | Paramètres | Réponse, MIME et exemple | Codes observables | Effet, danger et répétition |
 |---|---|---|---|---|---|
-| POST | `/set-delay` | Corps formulaire `delai`. La valeur est convertie par `toInt()` sans validation serveur. | Redirection vers `/settings` (corps HTML de redirection). | 302. | **Modifie la durée physique persistée du relais : danger élevé.** Action administrative non répétable automatiquement. L'UI actuelle propose 100–5000 ms, mais le serveur n'impose pas ces bornes. |
-| GET | `/clear-log` | Aucun paramètre. | `text/plain`, `Historique effacé !`. | 200, y compris si la recréation du fichier échoue. | Destructif, modéré. Confirmation humaine obligatoire, jamais automatisé. |
+| POST | `/api/time` | Corps formulaire `epoch`, strictement compris entre 2020-01-01 et 2100-01-01. | 204, ou erreur JSON. | 204, 400, 500. | Règle uniquement l'horloge RAM ; aucune écriture flash et aucun effet portail. |
+| POST | `/set-delay` | Corps formulaire numérique `delai`, validé entre 100 et 5000 ms. | Redirection vers `/settings`. | 302 ou 400. | **Modifie la durée physique persistée du relais : danger élevé.** Action administrative non répétable automatiquement. |
+| GET | `/clear-log` | Aucun paramètre. | `text/plain`, effacement mis en file. | 202 ou 503. | Destructif, modéré. Confirmation humaine obligatoire, jamais automatisé. |
 | GET | `/delete-user?name=...` | Query `name` obligatoire. | Redirection `/users` ou erreur `text/plain`. | 302, 400, 500. | Destructif, modéré. Non idempotent et sans authentification. |
 | POST | `/save` | Disponible quand le mode point d'accès est initialisé. Corps formulaire `ssid`, `password`. | `text/plain`, `Sauvegarde réussie. Redémarrage...`. | 200 ; paramètres absents susceptibles de provoquer une erreur interne. | **Enregistre les identifiants Wi-Fi puis redémarre l'ESP32 : danger élevé.** Action humaine locale uniquement, aucun retry. |
 
@@ -76,3 +78,32 @@ Les fichiers web contiennent encore des appels ou formulaires vers `POST /enrol`
 - OTA Arduino : hostname `portail-esp32`, mot de passe local dans `include/config.h`.
 - Watchdog : 30 s, alimenté dans `loop()`.
 - Journal série : 115200 bauds ; journal persistant SPIFFS en CSV séparé par `;`.
+# Détails de fiabilisation locale
+
+## Stable gate state
+
+`GET /etat` returns `ferme` or `ouvert` from the debounced state. GPIO34 is
+configured as `INPUT` because this ESP32 input has no usable internal pull-up or
+pull-down. A raw change must remain unchanged for 400 ms before it becomes the
+stable state.
+
+`GET /api/diagnostic` exposes `portal.sensor_raw`, `portal.sensor_stable` and
+`portal.sensor_bounce_count`. The counter records rejected pending states; it is
+diagnostic data and is never written to SPIFFS.
+
+## Local clock
+
+`POST /api/time` accepts a form field named `epoch`. Values are restricted to
+2020-01-01 through 2100-01-01. The value adjusts RAM/system time only; it is not
+persisted and portal operation never depends on it.
+
+Until a browser supplies time, log timestamps use `boot:<boot_count>+<uptime>`.
+After synchronization they use `epoch:<unix_seconds>`. This prevents deceptive
+1970 dates and keeps pre-reboot session timestamps unambiguous.
+
+## History policy
+
+GPIO transitions are logged only after debounce as `PORTAIL_OUVERT` and
+`PORTAIL_FERME;duration=<seconds>`. Wi-Fi loss is logged only after 30 seconds;
+recovery includes the outage duration. `/log.txt` remains capped at 64 KiB and
+rotates once to `/log.old.txt` under the SPIFFS mutex.

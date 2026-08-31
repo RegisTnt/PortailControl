@@ -8,12 +8,14 @@
 #include <Preferences.h>
 #include "wifi_manager.h"
 #include <time.h>
+#include <sys/time.h>
 #include <esp_task_wdt.h>
 #include <esp_system.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "recovery_config.h"
+#include "sensor_debounce.h"
 
 #if __has_include("config.h")
 #include "config.h"
@@ -31,6 +33,9 @@
 #define KEEPALIVE_INTERVAL 60000
 #define WATCHDOG_TIMEOUT 30
 #define LOG_MAX_SIZE_BYTES 65536UL
+#define SENSOR_DEBOUNCE_MS 400UL
+#define MIN_VALID_EPOCH 1577836800UL
+#define MAX_VALID_EPOCH 4102444800UL
 
 AsyncWebServer server(80);
 Preferences prefs;
@@ -52,6 +57,9 @@ uint32_t bootCount = 0;
 esp_reset_reason_t lastResetReason = ESP_RST_UNKNOWN;
 bool mdnsActive = false;
 unsigned long mdnsNextAttemptAt = 0;
+SensorDebounce gateSensor(SENSOR_DEBOUNCE_MS);
+unsigned long gateOpenedAt = 0;
+bool localClockKnown = false;
 
 
 // -------------------------
@@ -65,15 +73,12 @@ void writeLogEntry(const char *etat) {
     Serial.println("[SPIFFS] Log ignore: stockage occupe");
     return;
   }
-  time_t now = time(nullptr);
-  struct tm *timeinfo = localtime(&now);
-
-  char timestamp[24];
-
-  if (timeinfo) {
-    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+  char timestamp[40];
+  if (localClockKnown) {
+    snprintf(timestamp, sizeof(timestamp), "epoch:%lld", static_cast<long long>(time(nullptr)));
   } else {
-    strcpy(timestamp, "1970-01-01 00:00:00");
+    snprintf(timestamp, sizeof(timestamp), "boot:%lu+%lu",
+             static_cast<unsigned long>(bootCount), millis() / 1000UL);
   }
 
   File existing = SPIFFS.open("/log.txt", FILE_READ);
@@ -153,9 +158,27 @@ void initialiserLog() {
 void journaliserEvenementWiFi() {
   switch (consumeWiFiRecoveryEvent()) {
     case WiFiRecoveryEvent::LOST: logEtatPortail("WIFI_LOST"); break;
-    case WiFiRecoveryEvent::RECONNECTED: logEtatPortail("WIFI_RECONNECTED"); break;
+    case WiFiRecoveryEvent::RECONNECTED:
+      logEtatPortail("WIFI_RECONNECTED;duration=" + String(getLastWiFiOutageDurationSeconds()));
+      break;
     case WiFiRecoveryEvent::RECOVERY_AP_STARTED: logEtatPortail("WIFI_RECOVERY_AP"); break;
     default: break;
+  }
+}
+
+void gererCapteurPortail() {
+  const unsigned long now = millis();
+  const bool sample = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
+  if (!gateSensor.update(sample, now)) return;
+
+  if (gateSensor.stable()) {
+    String event = "PORTAIL_FERME";
+    if (gateOpenedAt != 0) event += ";duration=" + String((now - gateOpenedAt) / 1000UL);
+    gateOpenedAt = 0;
+    logEtatPortail(event);
+  } else {
+    gateOpenedAt = now;
+    logEtatPortail("PORTAIL_OUVERT");
   }
 }
 
@@ -252,8 +275,14 @@ void declarerRouteDiagnostic() {
     memory["free_heap"] = ESP.getFreeHeap();
     memory["min_free_heap"] = ESP.getMinFreeHeap();
     JsonObject portal = response["portal"].to<JsonObject>();
-    portal["closed"] = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
+    portal["closed"] = gateSensor.stable();
+    portal["sensor_raw"] = gateSensor.raw();
+    portal["sensor_stable"] = gateSensor.stable();
+    portal["sensor_bounce_count"] = gateSensor.bounceCount();
     portal["relay_active"] = relayActive;
+    JsonObject clock = response["clock"].to<JsonObject>();
+    clock["known"] = localClockKnown;
+    if (localClockKnown) clock["epoch"] = static_cast<int64_t>(time(nullptr));
 
     String payload;
     serializeJson(response, payload);
@@ -333,8 +362,7 @@ void declarerRoutesActions() {
   });
 
   server.on("/etat", HTTP_GET, [](AsyncWebServerRequest *request) {
-    bool ferme = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
-    request->send(200, "text/plain", ferme ? "ferme" : "ouvert");
+    request->send(200, "text/plain", gateSensor.stable() ? "ferme" : "ouvert");
   });
 }
 
@@ -358,6 +386,26 @@ bool parseBoundedUnsigned(const String &value, unsigned long minimum,
 // Routes paramètres
 // -------------------------
 void declarerRoutesParametres() {
+  server.on("/api/time", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!request->hasParam("epoch", true)) {
+      request->send(400, "application/json", "{\"error\":\"epoch manquant\"}");
+      return;
+    }
+    unsigned long epoch = 0;
+    if (!parseBoundedUnsigned(request->getParam("epoch", true)->value(),
+                              MIN_VALID_EPOCH, MAX_VALID_EPOCH, epoch)) {
+      request->send(400, "application/json", "{\"error\":\"epoch invalide\"}");
+      return;
+    }
+    timeval value{static_cast<time_t>(epoch), 0};
+    if (settimeofday(&value, nullptr) != 0) {
+      request->send(500, "application/json", "{\"error\":\"horloge non reglee\"}");
+      return;
+    }
+    localClockKnown = true;
+    request->send(204);
+  });
+
   server.on("/set-delay", HTTP_POST, [](AsyncWebServerRequest *request) {
     unsigned long requestedDelay = 0;
     if (!request->hasParam("delai", true) ||
@@ -575,6 +623,10 @@ void setup() {
   prefs.end();
   lastResetReason = esp_reset_reason();
 
+  const bool initialGateClosed = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
+  gateSensor.begin(initialGateClosed, millis());
+  if (!initialGateClosed) gateOpenedAt = millis();
+
   relaySafetyReady = xTaskCreate(relaySafetyTask, "relay-safety", 2048, nullptr, 3, nullptr) == pdPASS;
   if (!relaySafetyReady) {
     Serial.println("[Relay] ERREUR: tache de securite non creee");
@@ -598,9 +650,9 @@ void setup() {
   server.begin();
 
   logEtatPortail("demarrage_esp32");
-
-  bool etatInitial = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
-  logEtatPortail(etatInitial ? "etat_initial_ferme" : "etat_initial_ouvert");
+  if (lastResetReason != ESP_RST_POWERON && lastResetReason != ESP_RST_SW) {
+    logEtatPortail("RESET_ANORMAL;reason=" + String(resetReasonText(lastResetReason)));
+  }
 
   Serial.println("✅ Serveur web démarré !");
 }
@@ -615,6 +667,7 @@ void loop() {
   gererRelais();
   handleWiFi();
   journaliserEvenementWiFi();
+  gererCapteurPortail();
   handleMdns();
   if (isWiFiRestartPending()) {
     clearWiFiRestartPending();
@@ -626,17 +679,6 @@ void loop() {
   if (millis() - lastKeepAlive >= KEEPALIVE_INTERVAL) {
     lastKeepAlive = millis();
     keepAliveLog();
-  }
-
-  static bool etatPrec = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
-  bool etatActuel = digitalRead(PIN_CAPTEUR_FERME) == HIGH;
-
-  if (etatActuel != etatPrec) {
-    String etatStr = etatActuel ? "ferme" : "ouvert";
-
-    logEtatPortail(etatStr);
-
-    etatPrec = etatActuel;
   }
 
   delay(10);

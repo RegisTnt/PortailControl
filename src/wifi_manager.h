@@ -13,6 +13,7 @@ void handleWiFi();
 WiFiRecoveryState getWiFiRecoveryState();
 WiFiRecoveryEvent consumeWiFiRecoveryEvent();
 uint32_t getWiFiReconnectCount();
+uint32_t getLastWiFiOutageDurationSeconds();
 bool isWiFiRecoveryAPActive();
 bool isWiFiRestartPending();
 void clearWiFiRestartPending();

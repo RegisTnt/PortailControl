@@ -45,6 +45,10 @@ const diagnosticElements = {
   freeHeap: document.querySelector('#diagnosticFreeHeap'),
   minFreeHeap: document.querySelector('#diagnosticMinFreeHeap'),
   portalClosed: document.querySelector('#diagnosticPortalClosed'),
+  sensorRaw: document.querySelector('#diagnosticSensorRaw'),
+  sensorStable: document.querySelector('#diagnosticSensorStable'),
+  sensorBounceCount: document.querySelector('#diagnosticSensorBounceCount'),
+  clock: document.querySelector('#diagnosticClock'),
   relayActive: document.querySelector('#diagnosticRelayActive')
 };
 
@@ -74,6 +78,27 @@ async function directFetch(path) {
       throw new Error('Délai de réponse dépassé. Ne renvoyez pas automatiquement la commande.');
     }
     throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function syncLocalClock() {
+  if (!navigator.onLine) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const epoch = Math.floor(Date.now() / 1000);
+    const response = await fetch('/api/time', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: new URLSearchParams({ epoch: String(epoch) }),
+      signal: controller.signal
+    });
+    return response.ok;
+  } catch (_) {
+    return false;
   } finally {
     clearTimeout(timer);
   }
@@ -240,14 +265,49 @@ async function sendCommand(path, button) {
 
 function historyMeta(eventName) {
   const value = eventName.toLowerCase();
-  if (value.includes('pieton')) return { icon: '#i-walk', tone: 'walk', title: 'Impulsion piétonne', detail: 'Commande enregistrée' };
-  if (value.includes('voiture')) return { icon: '#i-car', tone: 'car', title: 'Impulsion complète', detail: 'Commande enregistrée' };
+  const durationMatch = value.match(/(?:^|;)duration=(\d+)/);
+  const duration = durationMatch ? Number(durationMatch[1]) : null;
+  if (value.includes('commande_pieton')) return { icon: '#i-walk', tone: 'walk', title: 'Ouverture piéton', detail: 'Commande locale' };
+  if (value.includes('commande_voiture')) return { icon: '#i-car', tone: 'car', title: 'Ouverture voiture', detail: 'Commande locale' };
+  if (value.startsWith('portail_ferme')) return { icon: '#i-lock', tone: 'closed', title: 'Portail refermé', detail: duration === null ? 'Fermeture confirmée' : `Ouvert pendant ${duration} s` };
+  if (value.startsWith('portail_ouvert')) return { icon: '#i-home', tone: 'car', title: 'Portail ouvert', detail: 'Ouverture confirmée' };
   if (value === 'ferme' || value.includes('initial_ferme')) return { icon: '#i-lock', tone: 'closed', title: 'Portail fermé', detail: 'Capteur confirmé' };
   if (value === 'ouvert' || value.includes('initial_ouvert')) return { icon: '#i-home', tone: 'car', title: 'Portail non fermé', detail: 'Capteur non actif' };
   if (value.includes('redemarrage') || value.includes('demarrage')) return { icon: '#i-refresh', tone: '', title: 'ESP32 redémarré', detail: 'Système initialisé' };
-  if (value.includes('wifi')) return { icon: '#i-wifi', tone: '', title: 'Connexion Wi-Fi', detail: value.includes('perdu') ? 'Reconnexion demandée' : 'Événement réseau' };
+  if (value.startsWith('wifi_reconnected')) return { icon: '#i-wifi', tone: '', title: 'Wi-Fi rétabli', detail: duration === null ? 'Connexion locale restaurée' : `Interruption ${duration} s` };
+  if (value.startsWith('wifi_lost')) return { icon: '#i-wifi', tone: 'error', title: 'Wi-Fi interrompu', detail: 'Coupure supérieure à 30 s' };
+  if (value.includes('wifi')) return { icon: '#i-wifi', tone: '', title: 'Recovery Wi-Fi', detail: 'Intervention locale disponible' };
+  if (value.startsWith('reset_anormal')) return { icon: '#i-alert', tone: 'error', title: 'Redémarrage anormal', detail: eventName.split(';').slice(1).join(' · ').replaceAll('_', ' ') };
   if (value.includes('erreur') || value.includes('echec') || value.includes('ignoree')) return { icon: '#i-alert', tone: 'error', title: 'Alerte système', detail: eventName.replaceAll('_', ' ') };
   return { icon: '#i-settings', tone: '', title: 'Événement système', detail: eventName.replaceAll('_', ' ') };
+}
+
+function parseHistoryTimestamp(value) {
+  if (value.startsWith('epoch:')) {
+    const epoch = Number(value.slice(6));
+    const date = new Date(epoch * 1000);
+    if (Number.isFinite(epoch) && !Number.isNaN(date.getTime())) {
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      return { date: dateKey, time: date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }), sortable: epoch };
+    }
+  }
+  const session = value.match(/^boot:(\d+)\+(\d+)$/);
+  if (session) {
+    const total = Number(session[2]);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    return { date: `Session ${session[1]} sans heure`, time: `+${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`, sortable: total };
+  }
+  if (value.startsWith('1970-01-01')) return { date: 'Ancien journal sans heure', time: 'Heure inconnue', sortable: 0 };
+  return { date: value.slice(0, 10), time: value.slice(11, 16), sortable: Date.parse(value.replace(' ', 'T')) || 0 };
+}
+
+function isUsefulHistoryEvent(eventName) {
+  const value = eventName.toLowerCase();
+  return value.startsWith('portail_') || value.startsWith('commande_') ||
+    value.startsWith('wifi_') || value.includes('demarrage') ||
+    value.startsWith('reset_anormal') || value.includes('erreur') || value.includes('echec');
 }
 
 function historyDateLabel(dateText) {
@@ -290,8 +350,9 @@ async function loadHistory() {
       const separator = line.indexOf(';');
       if (separator < 0) return null;
       const timestamp = line.slice(0, separator).trim();
-      return { timestamp, date: timestamp.slice(0, 10), time: timestamp.slice(11, 16), event: line.slice(separator + 1).trim() };
-    }).filter(Boolean).reverse();
+      const parsed = parseHistoryTimestamp(timestamp);
+      return { timestamp, ...parsed, event: line.slice(separator + 1).trim() };
+    }).filter(entry => entry && isUsefulHistoryEvent(entry.event)).reverse();
     if (!entries.length) {
       elements.historyState.textContent = 'Aucun événement enregistré.';
       historyLoaded = true;
@@ -353,6 +414,10 @@ function renderHealth(data) {
   diagnosticElements.freeHeap.textContent = formatBytes(memory.free_heap);
   diagnosticElements.minFreeHeap.textContent = formatBytes(memory.min_free_heap);
   diagnosticElements.portalClosed.textContent = portal.closed === true ? 'Fermé' : portal.closed === false ? 'Non fermé' : '--';
+  diagnosticElements.sensorRaw.textContent = portal.sensor_raw === true ? 'Fermé' : portal.sensor_raw === false ? 'Non fermé' : '--';
+  diagnosticElements.sensorStable.textContent = portal.sensor_stable === true ? 'Fermé' : portal.sensor_stable === false ? 'Non fermé' : '--';
+  diagnosticElements.sensorBounceCount.textContent = Number.isFinite(Number(portal.sensor_bounce_count)) ? String(portal.sensor_bounce_count) : '--';
+  diagnosticElements.clock.textContent = data?.clock?.known === true ? 'Synchronisée localement' : 'Uptime de session';
   diagnosticElements.relayActive.textContent = portal.relay_active === true ? 'Actif' : portal.relay_active === false ? 'Inactif' : '--';
   diagnosticElements.state.className = `diagnostic-state ${wifi.connected === true && portal.relay_active === false ? 'diagnostic-ok' : 'diagnostic-warning'}`;
   diagnosticElements.state.textContent = wifi.connected === false
@@ -424,6 +489,7 @@ diagnosticElements.refresh.addEventListener('click', refreshHealth);
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => showView(item.dataset.target)));
 window.addEventListener('hashchange', () => showView(location.hash.slice(1), false));
 window.addEventListener('online', () => {
+  syncLocalClock();
   restartStatePolling(true);
   if (currentView === 'diagnostic') restartDiagnosticPolling(true);
 });
@@ -470,4 +536,5 @@ if ('serviceWorker' in navigator) {
 }
 
 showView(location.hash.slice(1), false);
+syncLocalClock();
 restartStatePolling(true);
