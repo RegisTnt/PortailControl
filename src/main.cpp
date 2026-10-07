@@ -16,6 +16,7 @@
 #include "freertos/semphr.h"
 #include "recovery_config.h"
 #include "sensor_debounce.h"
+#include "rf433.h"
 
 #if __has_include("config.h")
 #include "config.h"
@@ -60,6 +61,12 @@ unsigned long mdnsNextAttemptAt = 0;
 SensorDebounce gateSensor(SENSOR_DEBOUNCE_MS);
 unsigned long gateOpenedAt = 0;
 bool localClockKnown = false;
+
+// Etat RF de cette session. Snapshot coherent entre loop et le serveur async.
+char lastRfButton = '\0';
+unsigned long lastRfReceivedAt = 0;
+uint32_t rfReceiveCount = 0;
+portMUX_TYPE rfStateMux = portMUX_INITIALIZER_UNLOCKED;
 
 
 // -------------------------
@@ -209,6 +216,27 @@ bool activerRelais(int pin) {
   return accepted;
 }
 
+// Toute commande RF utilise exclusivement les protections existantes.
+void gererBoutonRF(char button) {
+  if (button < 'A' || button > 'D') return;
+  portENTER_CRITICAL(&rfStateMux);
+  lastRfButton = button;
+  lastRfReceivedAt = millis();
+  ++rfReceiveCount;
+  portEXIT_CRITICAL(&rfStateMux);
+  if (!RF_RELAY_CONTROL_ENABLED) {
+    Serial.println("[RF433] Commande relais DESACTIVEE (mode observation)");
+    return;
+  }
+  const int pin = button == 'A' ? RELAY_VOITURE : button == 'B' ? RELAY_PIETON : -1;
+  if (pin < 0) return; // C/D reserves, aucune action.
+  if (activerRelais(pin)) {
+    logEtatPortail(button == 'A' ? "commande_rf_voiture" : "commande_rf_pieton");
+  } else {
+    Serial.println("[RF433] Commande refusee par activerRelais()");
+  }
+}
+
 void handleMdns() {
   if (WiFi.status() == WL_CONNECTED && !mdnsActive) {
     if (static_cast<long>(millis() - mdnsNextAttemptAt) < 0) return;
@@ -259,7 +287,23 @@ void declarerRouteDiagnostic() {
     relayActive = relaisActif;
     portEXIT_CRITICAL(&relayMux);
 
+    char rfButton[2] = {};
+    unsigned long rfReceivedAt;
+    uint32_t rfCount;
+    portENTER_CRITICAL(&rfStateMux);
+    rfButton[0] = lastRfButton;
+    rfReceivedAt = lastRfReceivedAt;
+    rfCount = rfReceiveCount;
+    portEXIT_CRITICAL(&rfStateMux);
+
     JsonDocument response;
+    JsonObject rf = response["rf433"].to<JsonObject>();
+    rf["enabled"] = true;
+    rf["gpio"] = 27;
+    rf["relay_control"] = RF_RELAY_CONTROL_ENABLED;
+    rf["last_button"] = rfButton;
+    rf["last_received_ms"] = rfReceivedAt;
+    rf["receive_count"] = rfCount;
     response["firmware"] = FIRMWARE_VERSION;
     response["git"] = FIRMWARE_GIT_HASH;
     response["uptime_seconds"] = millis() / 1000UL;
@@ -286,7 +330,9 @@ void declarerRouteDiagnostic() {
 
     String payload;
     serializeJson(response, payload);
-    request->send(200, "application/json", payload);
+    AsyncWebServerResponse *diagnosticResponse = request->beginResponse(200, "application/json", payload);
+    diagnosticResponse->addHeader("Cache-Control", "no-store");
+    request->send(diagnosticResponse);
   });
 }
 
@@ -594,6 +640,11 @@ void setup() {
   digitalWrite(RELAY_PIETON, RELAIS_REPOS);
   digitalWrite(RELAY_VOITURE, RELAIS_REPOS);
 
+  RF433::begin(gererBoutonRF);
+  if (!RF_RELAY_CONTROL_ENABLED) {
+    Serial.println("[RF433] Commande relais DESACTIVEE (mode observation)");
+  }
+
   esp_task_wdt_init(WATCHDOG_TIMEOUT, true);
   esp_task_wdt_add(NULL);
 
@@ -665,6 +716,7 @@ void loop() {
   ArduinoOTA.handle();
 
   gererRelais();
+  RF433::handle();
   handleWiFi();
   journaliserEvenementWiFi();
   gererCapteurPortail();
